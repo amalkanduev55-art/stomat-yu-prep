@@ -72,16 +72,17 @@ function Model(props: Props & { mode: DisplayMode; translucent: boolean }) {
     bur.current.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), insertion);
     bur.current.rotateZ(props.settings.angle * Math.PI / 180);
   });
+  const localPath = useMemo(() => Array.from({ length: 65 }, (_, step) => guideLocalPoint(-1.42 + 2.84 * step / 64).add(new THREE.Vector3(0, .08, 0))), [guideLocalPoint]);
   const channels = useMemo(() => contactLayout(props.settings, props.selected).filter(slot => !fragment || Math.abs(slot.coordinate - firstIndex) <= .51).map(slot => {
     const tooth = toothPosition(firstIndex);
     const transform = new THREE.Matrix4().makeRotationY(-(firstIndex - 6.5) * .215).multiply(new THREE.Matrix4().makeTranslation(-tooth[0], 0, -tooth[2]));
     return { key: slot.key, points: Array.from({ length: 65 }, (_, step) => {
       const point = guideSurfacePoint(slot.coordinate, -1.42 + 2.84 * step / 64, thickness);
       if (fragment) point.applyMatrix4(transform);
-      point.y += lifted + .12;
+      point.y += .12;
       return point;
     }) };
-  }), [props.settings.shaft, props.settings.clearance, props.selected, thickness, fragment, firstIndex, lifted]);
+  }), [props.settings.shaft, props.settings.clearance, props.selected, thickness, fragment, firstIndex]);
   return <group name="cad-model">
     {showTeeth && props.layers.roots && !props.imported && toothIds.map((id, index) => fragment && index !== firstIndex ? null : <group key={`roots-${id}`} name={`demo-roots-${id}`} position={fragment ? [0, 0, 0] : toothPosition(index)} rotation={[0, fragment ? 0 : (index - 6.5) * .215, 0]}>{roots[index].map((geometry, rootIndex) => <group key={rootIndex}><mesh geometry={geometry}><meshStandardMaterial color="#d6c6a5" roughness={.72} transparent={props.layerOpacities.roots < 100} opacity={props.layerOpacities.roots / 100} depthWrite={props.layerOpacities.roots === 100} /></mesh>{props.wireframe && <mesh geometry={geometry}><meshBasicMaterial color="#7d7057" wireframe transparent opacity={.12} /></mesh>}</group>)}</group>)}
     {showTeeth && props.layers.gum && !props.imported && !fragment && <group><mesh geometry={gingiva}><meshPhysicalMaterial vertexColors roughness={.5} clearcoat={.16} clearcoatRoughness={.45} side={THREE.DoubleSide} transparent={props.layerOpacities.gum < 100} opacity={props.layerOpacities.gum / 100} /></mesh>{props.wireframe && <mesh geometry={gingiva}><meshBasicMaterial color="#934e60" wireframe transparent opacity={.08} /></mesh>}</group>}
@@ -101,17 +102,18 @@ function Model(props: Props & { mode: DisplayMode; translucent: boolean }) {
         <mesh position={[0, -props.settings.length / 2, 0]}><cylinderGeometry args={[props.settings.diameter / 2, props.settings.diameter / 2 * (props.settings.profile === 1 ? 1 : .7), props.settings.length, 32]} /><meshStandardMaterial color={props.collision && props.settings.angle > 15 ? '#ef6b57' : '#87929a'} metalness={.8} roughness={.65} transparent={props.layerOpacities.bur < 100} opacity={props.layerOpacities.bur / 100} /></mesh>
         {props.settings.stopperEnabled === 1 && stopper && <mesh position={[0, -props.settings.stopperPosition, 0]} geometry={stopper}><meshStandardMaterial color="#aab5bf" metalness={.9} roughness={.25} side={THREE.DoubleSide} transparent={props.layerOpacities.bur < 100} opacity={props.layerOpacities.bur / 100} /></mesh>}
         </group>}
+      {props.layers.channels && channels.map(channel => <Line key={channel.key} points={channel.points} color="#8fadb8" transparent opacity={props.layerOpacities.channels / 100} lineWidth={2} />)}
+      {slots.length > 0 && props.selected.length > 0 && props.layers.trajectory && <Line points={localPath} color="#26a9b5" lineWidth={fragment ? 3 : 2} transparent opacity={props.layerOpacities.trajectory / 100} dashed dashSize={.25} gapSize={.15} />}
+      {fragment && showGuide && slots.length > 0 && props.selected.length > 0 && <group>
+        {[12, 32, 52].map(step => {
+          const tangent = localPath[step + 1].clone().sub(localPath[step - 1]).normalize();
+          return <mesh key={`direction-${step}`} position={localPath[step]} quaternion={new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent)}><coneGeometry args={[.23, .65, 16]} /><meshBasicMaterial color="#287f91" /></mesh>;
+        })}
+        {[0, 32, 64].map((step, index) => <group key={step} position={localPath[step]}><mesh><sphereGeometry args={[.13, 12, 12]} /><meshBasicMaterial color="#287f91" /></mesh><Html center position={[index === 1 ? 3.6 : 4, index === 1 ? 1.7 : .4, 0]}><span className="channel-label">{['① Передний вход', '② Через верх', '③ Задний выход'][index]}</span></Html><Line points={[[0, 0, 0], [index === 1 ? 3.3 : 3.7, index === 1 ? 1.7 : .4, 0]]} color="#287f91" lineWidth={1} /></group>)}
+        <Html center position={[-3.8, .6, 0]}><span className="channel-label base-label">Цельная нижняя часть</span></Html>
+      </group>}
     </group>
-    {props.layers.channels && channels.map(channel => <Line key={channel.key} points={channel.points} color="#8fadb8" transparent opacity={props.layerOpacities.channels / 100} lineWidth={2} />)}
-    {slots.length > 0 && props.selected.length > 0 && props.layers.trajectory && <Line points={worldPath} color="#26a9b5" lineWidth={fragment ? 3 : 2} transparent opacity={props.layerOpacities.trajectory / 100} dashed dashSize={.25} gapSize={.15} />}
-    {fragment && showGuide && slots.length > 0 && props.selected.length > 0 && <group>
-      {[12, 32, 52].map(step => {
-        const tangent = worldPath[step + 1].clone().sub(worldPath[step - 1]).normalize();
-        return <mesh key={`direction-${step}`} position={worldPath[step]} quaternion={new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent)}><coneGeometry args={[.23, .65, 16]} /><meshBasicMaterial color="#287f91" /></mesh>;
-      })}
-      {[0, 32, 64].map((step, index) => <group key={step} position={worldPath[step]}><mesh><sphereGeometry args={[.13, 12, 12]} /><meshBasicMaterial color="#287f91" /></mesh><Html center position={[index === 1 ? 3.6 : 4, index === 1 ? 1.7 : .4, 0]}><span className="channel-label">{['① Передний вход', '② Через верх', '③ Задний выход'][index]}</span></Html><Line points={[[0, 0, 0], [index === 1 ? 3.3 : 3.7, index === 1 ? 1.7 : .4, 0]]} color="#287f91" lineWidth={1} /></group>)}
-      <Html center position={[-3.8, .6, 0]}><span className="channel-label base-label">Цельная нижняя часть</span></Html>
-    </group>}
+
 
   </group>;
 }
