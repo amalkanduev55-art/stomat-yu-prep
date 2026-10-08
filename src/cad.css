@@ -291,3 +291,28 @@
   .cad-theme .viewer-tools { left: 13px; }
   .cad-theme .viewer-top { left: 13px; right: 13px; }
 }
+.cad-theme .analysis-result { margin: 10px 0 12px; padding: 11px; border: 1px dashed #455a68; border-radius: 5px; background: #202b34; }
+.cad-theme .analysis-result-head { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; }
+.cad-theme .analysis-result-head div { display:flex; flex-direction:column; gap:3px; }
+.cad-theme .analysis-result-head b { color:#c6d8e3; font-size:9px; }
+.cad-theme .analysis-result-head span { color:#8fa8b9; font-size:7px; }
+.cad-theme .analysis-pending { padding:3px 5px; border:1px solid #665d43; border-radius:3px; color:#c8b98d !important; font:7px 'JetBrains Mono',monospace; white-space:nowrap; }
+.cad-theme .analysis-result-grid { display:grid; grid-template-columns:1fr 1fr; gap:5px; margin-top:9px; }
+.cad-theme .analysis-result-grid div { padding:7px; border:1px solid #344650; border-radius:4px; background:#18222a; }
+.cad-theme .analysis-result-grid span { display:block; color:#879ead; font-size:7px; }
+.cad-theme .analysis-result-grid b { display:block; margin-top:3px; color:#bdced9; font:11px 'JetBrains Mono',monospace; }
+.cad-theme .analysis-result small { display:block; margin-top:8px; color:#8ea5b5; font-size:7px; line-height:1.55; }
+.cad-theme .template-switch { display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin:10px 0; }
+.cad-theme .template-switch button { display:flex; align-items:center; gap:7px; min-width:0; padding:8px; border:1px solid #3e5361; border-radius:5px; background:#202c35; color:#9eb3c2; text-align:left; cursor:pointer; }
+.cad-theme .template-switch button.active { border-color:#6b9489; background:#2b403b; color:#d2e3df; }
+.cad-theme .template-switch button>span { display:grid; place-items:center; width:25px; height:25px; border:1px solid #596e7b; border-radius:4px; font:8px 'JetBrains Mono',monospace; }
+.cad-theme .template-switch button.active>span { border-color:#7da79b; background:#38554d; }
+.cad-theme .template-switch button div { min-width:0; }
+.cad-theme .template-switch b,.cad-theme .template-switch small { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.cad-theme .template-switch b { font-size:8px; }
+.cad-theme .template-switch small { margin-top:2px; color:#8198a8; font-size:6px; }
+.cad-theme .template-status { margin:8px 0 10px; padding:9px; border:1px solid #394d5a; border-radius:5px; background:#202c35; }
+.cad-theme .template-status>div { display:flex; justify-content:space-between; gap:8px; padding:3px 0; font-size:8px; }
+.cad-theme .template-status>div span { color:#91a7b7; }
+.cad-theme .template-status>div b { color:#a9c8ba; font-weight:500; }
+.cad-theme .template-status small { display:block; margin-top:6px; color:#839aaa; font-size:7px; line-height:1.5; }
