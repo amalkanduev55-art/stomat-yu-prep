@@ -1,0 +1,11 @@
+{
+  "title": "2зуб",
+  "description": "This interactive 3D CAD/CAM workspace for dentistry enables professionals to design and customize dental procedures with precision, enhancing workflow efficiency.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
