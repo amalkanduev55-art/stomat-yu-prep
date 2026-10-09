@@ -139,8 +139,8 @@ export default function App() {
     const frame = guideRef.current;
     if (!frame) { notify('Направляющий не найден в сцене'); return; }
     frame.updateMatrixWorld(true);
-    // Корпус направляющего — Mesh, прямой потомок guide-frame (бор и линии лежат в других дочерних объектах)
-    const body = frame.children.find((child): child is THREE.Mesh => child instanceof THREE.Mesh);
+    const bodies = frame.children.filter((child): child is THREE.Mesh => child instanceof THREE.Mesh && child.type === 'Mesh');
+    const body = bodies.length === 1 ? bodies[0] : undefined;
     if (!body?.geometry) { notify('Корпус направляющего не найден'); return; }
     const geometry = body.geometry.clone();
     geometry.applyMatrix4(body.matrixWorld);
