@@ -332,6 +332,47 @@ describe('alignPointsRigid', () => {
     }
   });
 
+
+  it('Jacobi scale-invariant: zero diagonals with non-zero off-diagonals still converge', () => {
+    // Indirect test via alignment that exercises the solver on well-conditioned data
+    const src = [
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(0, 1, 0),
+    ];
+    const m = new THREE.Matrix4().makeRotationZ(Math.PI / 2);
+    const res = alignPointsRigid(src, applyRigid(src, m));
+    expect(res).not.toBeNull();
+    expect(res!.rmse).toBeLessThan(1e-8);
+    expect(Number.isFinite(res!.rmse)).toBe(true);
+  });
+
+  it('rigid alignment with non-zero rotation across multiple scales (including <1e-4)', () => {
+    // Scales where double precision still permits accurate relative error
+    const scales = [1e-5, 1e-4, 1e-2, 1, 1e2, 1e4];
+    const angles = [0.3, Math.PI / 4, 1.2];
+    for (const s of scales) {
+      for (const ang of angles) {
+        const src = [
+          new THREE.Vector3(0, 0, 0),
+          new THREE.Vector3(1, 0, 0),
+          new THREE.Vector3(0, 1, 0),
+          new THREE.Vector3(0.2, 0.3, 0),
+        ].map(p => p.multiplyScalar(s));
+        const m = new THREE.Matrix4().makeRotationZ(ang).setPosition(s * 0.15, -s * 0.08, 0);
+        const tgt = applyRigid(src, m);
+        const res = alignPointsRigid(src, tgt);
+        expect(res).not.toBeNull();
+        const rel = res!.rmse / s;
+        expect(rel).toBeLessThan(1e-5);
+        expect(Number.isFinite(res!.rmse)).toBe(true);
+        for (const e of res!.matrix.elements) {
+          expect(Number.isFinite(e)).toBe(true);
+        }
+      }
+    }
+  });
+
   it('order of pairs does not matter', () => {
     const m = fixedRotations[2].clone().setPosition(2, 3, -1);
     const target = applyRigid(basePoints, m);

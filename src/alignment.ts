@@ -155,7 +155,16 @@ function jacobiEigenSymmetric3(m: number[]): { eigenvalues: number[]; eigenvecto
   const v = [1, 0, 0, 0, 1, 0, 0, 0, 1]; // identity
 
   const maxSweeps = 20;
+  const relEps = 1e-12;
   for (let sweep = 0; sweep < maxSweeps; sweep++) {
+    // Scale from all elements (handles zero diagonals with non-zero off-diagonals)
+    let scale = 0;
+    for (let i = 0; i < 9; i++) {
+      const v = Math.abs(a[i]);
+      if (Number.isFinite(v) && v > scale) scale = v;
+    }
+    if (scale === 0 || !Number.isFinite(scale)) break; // zero / invalid matrix
+
     let maxOff = 0;
     for (let p = 0; p < 3; p++) {
       for (let q = p + 1; q < 3; q++) {
@@ -163,18 +172,15 @@ function jacobiEigenSymmetric3(m: number[]): { eigenvalues: number[]; eigenvecto
         if (apq > maxOff) maxOff = apq;
       }
     }
-    // Relative convergence: scale by max |diagonal| (or 1 if zero matrix)
-    let scale = 0;
-    for (let i = 0; i < 3; i++) scale = Math.max(scale, Math.abs(a[i * 3 + i]));
-    if (scale === 0 || !Number.isFinite(scale)) scale = 1;
-    if (maxOff < 1e-12 * scale) break;
+    if (maxOff < relEps * scale) break;
 
     for (let p = 0; p < 3; p++) {
       for (let q = p + 1; q < 3; q++) {
         const app = a[p * 3 + p];
         const aqq = a[q * 3 + q];
         const apq = a[p * 3 + q];
-        if (Math.abs(apq) < 1e-12 * Math.max(1, Math.abs(app), Math.abs(aqq))) continue;
+        // Skip only if negligible relative to overall matrix scale (scale-invariant)
+        if (Math.abs(apq) < relEps * scale) continue;
 
         const tau = (aqq - app) / (2 * apq);
         // Stable Jacobi t: when tau===0 yields t=1 (45° rotation), avoids Math.sign(0)=0
@@ -254,26 +260,32 @@ function jacobiEigenSymmetric4(m: number[]): { eigenvalues: number[]; eigenvecto
   for (let i = 0; i < 4; i++) v[i * 4 + i] = 1;
 
   const maxSweeps = 30;
+  const relEps = 1e-12;
 
   for (let sweep = 0; sweep < maxSweeps; sweep++) {
+    // Scale from all elements (handles zero diagonals with non-zero off-diagonals)
+    let scale = 0;
+    for (let i = 0; i < 16; i++) {
+      const v = Math.abs(a[i]);
+      if (Number.isFinite(v) && v > scale) scale = v;
+    }
+    if (scale === 0 || !Number.isFinite(scale)) break; // zero / invalid matrix
+
     let maxOff = 0;
     for (let p = 0; p < 4; p++) {
       for (let q = p + 1; q < 4; q++) {
         maxOff = Math.max(maxOff, Math.abs(a[p * 4 + q]));
       }
     }
-    // Relative convergence to matrix scale
-    let scale = 0;
-    for (let i = 0; i < 4; i++) scale = Math.max(scale, Math.abs(a[i * 4 + i]));
-    if (scale === 0 || !Number.isFinite(scale)) scale = 1;
-    if (maxOff < 1e-12 * scale) break;
+    if (maxOff < relEps * scale) break;
 
     for (let p = 0; p < 4; p++) {
       for (let q = p + 1; q < 4; q++) {
         const app = a[p * 4 + p];
         const aqq = a[q * 4 + q];
         const apq = a[p * 4 + q];
-        if (Math.abs(apq) < 1e-12 * Math.max(1, Math.abs(app), Math.abs(aqq))) continue;
+        // Skip only if negligible relative to overall matrix scale (scale-invariant)
+        if (Math.abs(apq) < relEps * scale) continue;
 
         const tau = (aqq - app) / (2 * apq);
         // Stable Jacobi t: when tau===0 yields t=1, avoids Math.sign(0)=0
