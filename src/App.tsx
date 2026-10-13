@@ -209,7 +209,7 @@ export default function App() {
             const res = computeRegistration(guidePoints, scanPoints);
             if (res) {
               const accepted = window.confirm(
-                `Предварительное совмещение рассчитано.\\nRMSE: ${res.rmse.toFixed(3)} мм · пар: ${res.pointCount}.\\n\\nRMSE оценивает только совпадение выбранных точек и не подтверждает анатомическую посадку или клиническую безопасность. Проверьте модель отдельно.\\n\\nПрименить матрицу к направляющей?`
+                `Предварительное совмещение рассчитано.\nRMSE: ${res.rmse.toFixed(3)} мм · пар: ${res.pointCount}.\n\nRMSE оценивает только совпадение выбранных точек и не подтверждает анатомическую посадку или клиническую безопасность. Проверьте модель отдельно.\n\nПрименить матрицу к направляющей?`
               );
               if (!accepted) {
                 setReg(current => ({ ...current, alignmentMatrix: null, alignmentResult: res, regStatus: 'ready', registrationMode: true }));
