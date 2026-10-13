@@ -13,6 +13,19 @@ import { toothIds } from './geometry';
 import { contactLayout, contactSlots, guideLayout, type SlotCounts } from './guideGeometry';
 import { bestFitRigid, type BestFitResult } from './bestFit';
 import { alignPointsRigid, type AlignmentResult } from './alignment';
+import {
+  emptyRegistration,
+  resetRegistrationState,
+  addScanPoint,
+  addGuidePoint,
+  undoLastPair,
+  canCompute,
+  hasIncompletePair,
+  computeRegistration,
+  pairCount,
+  type RegistrationState,
+  type PickPhase,
+} from './registration';
 
 const stages = ['Модели', 'Препарирование', 'Бор и стоппер', 'Траектория', 'Шаблоны', 'Валидация'];
 const initial: Settings = { diameter: 1.6, length: 6, shaft: 1.6, totalLength: 19, stopper: 4.5, stopperInner: 1.7, stopperShape: 0, stopperEnabled: 1, stopperHeight: 1, stopperPosition: 5, clearance: .15, wall: 1.5, angle: 0, profile: 0 };
@@ -73,12 +86,14 @@ export default function App() {
   const [targetImported, setTargetImported] = useState<THREE.BufferGeometry | null>(null);
   const [bestFit, setBestFit] = useState<BestFitResult | null>(null);
   const [bestFitBusy, setBestFitBusy] = useState(false);
-  const [alignmentMatrix, setAlignmentMatrix] = useState<THREE.Matrix4 | null>(null);
-  const [alignmentResult, setAlignmentResult] = useState<AlignmentResult | null>(null);
-  const [registrationMode, setRegistrationMode] = useState(false);
-  const [scanPoints, setScanPoints] = useState<THREE.Vector3[]>([]);
-  const [guidePoints, setGuidePoints] = useState<THREE.Vector3[]>([]);
-  const [regStatus, setRegStatus] = useState<'idle' | 'picking' | 'ready' | 'done' | 'error'>('idle');
+  const [reg, setReg] = useState<RegistrationState>(emptyRegistration);
+  const alignmentMatrix = reg.alignmentMatrix;
+  const alignmentResult = reg.alignmentResult;
+  const registrationMode = reg.registrationMode;
+  const scanPoints = reg.scanPoints;
+  const guidePoints = reg.guidePoints;
+  const regStatus = reg.regStatus;
+  const pickPhase = reg.pickPhase;
 
   const [files, setFiles] = useState({ original: 'Не загружен', target: 'Не загружен' });
   const opacity = layerOpacities.target;
@@ -147,20 +162,33 @@ export default function App() {
     const frame = guideRef.current;
     if (!frame) { notify('Направляющий не найден в сцене'); return; }
     frame.updateMatrixWorld(true);
-    const bodies = frame.children.filter((child): child is THREE.Mesh => child instanceof THREE.Mesh && child.type === 'Mesh');
-    const body = bodies.length === 1 ? bodies[0] : undefined;
+    // Export only the main guide body mesh with its world transform (includes alignmentMatrix).
+    // Channels (Lines), bur and stopper are not part of the printable shell in this MVP.
+    const bodies = frame.children.filter((child): child is THREE.Mesh => child instanceof THREE.Mesh && child.type === 'Mesh' && Boolean(child.geometry));
+    const body = bodies[0];
     if (!body?.geometry) { notify('Корпус направляющего не найден'); return; }
     const geometry = body.geometry.clone();
     geometry.applyMatrix4(body.matrixWorld);
+    const pos = geometry.getAttribute('position');
+    for (let i = 0; i < pos.count; i++) {
+      if (!Number.isFinite(pos.getX(i)) || !Number.isFinite(pos.getY(i)) || !Number.isFinite(pos.getZ(i))) {
+        geometry.dispose();
+        notify('Экспорт отменён: некорректные координаты после трансформации');
+        return;
+      }
+    }
     const exportMesh = new THREE.Mesh(geometry);
     const data = new STLExporter().parse(exportMesh, { binary: true });
     geometry.dispose();
     const url = URL.createObjectURL(new Blob([data], { type: 'application/octet-stream' }));
     const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'YU-024_Contacts_prototype.stl'; anchor.click(); URL.revokeObjectURL(url); save();
+    notify('Экспортирован корпус направляющей с мировым преобразованием. Скан не входит в STL. Стоппер и бор не изменялись.');
   };
   const upload = async (file: File | undefined, kind: 'original' | 'target') => {
     if (!file) return;
-    try { const buffer = await file.arrayBuffer(); const geometry = file.name.toLowerCase().endsWith('.ply') ? new PLYLoader().parse(buffer) : new STLLoader().parse(buffer); geometry.computeVertexNormals(); geometry.computeBoundingBox(); const size = new THREE.Vector3(); geometry.boundingBox!.getSize(size); if (size.length() === 0) throw new Error();  if (kind === 'original') setImported(geometry); else { setTargetImported(geometry); setLayers(current => ({ ...current, target: true })); } setBestFit(null); setFiles(current => ({ ...current, [kind]: file.name })); setValidated(false); cameraCommand('fit'); notify('Модель загружена без масштабирования и без принудительного смещения. Единицы проекта: мм; STL не содержит единиц измерения.'); } catch { notify('Не удалось прочитать STL / PLY'); }
+    try { const buffer = await file.arrayBuffer(); const geometry = file.name.toLowerCase().endsWith('.ply') ? new PLYLoader().parse(buffer) : new STLLoader().parse(buffer); geometry.computeVertexNormals(); geometry.computeBoundingBox(); const size = new THREE.Vector3(); geometry.boundingBox!.getSize(size); if (size.length() === 0) throw new Error();  if (kind === 'original') setImported(geometry); else { setTargetImported(geometry); setLayers(current => ({ ...current, target: true })); }
+    setReg(resetRegistrationState());
+    setBestFit(null); setFiles(current => ({ ...current, [kind]: file.name })); setValidated(false); cameraCommand('fit'); notify('Модель загружена. Регистрация сброшена. Единицы проекта: мм; STL не содержит единиц измерения.'); } catch { notify('Не удалось прочитать STL / PLY'); }
   };
   return <div className="app-shell cad-theme">
     <header className="topbar"><a className="brand" href="#" onClick={event => event.preventDefault()}><span className="brand-symbol">Y<span>U</span></span> YU-Prep <span className="beta">BETA</span></a><span className="top-divider" /><button className="project-picker" onClick={() => setModal('projects')}><FolderOpen size={16} /> {project} <ChevronDown size={14} /></button><span className="project-id">YU–024</span><div className="header-right"><span className="saved"><span /> Все изменения сохранены</span><button className="icon-button" onClick={save} title="Сохранить"><Save size={17} /></button><button className="icon-button" onClick={() => setModal('help')} title="Помощь"><CircleHelp size={18} /></button><span className="avatar">АК</span></div></header>
@@ -170,7 +198,7 @@ export default function App() {
         <div className="section-heading tooth-heading">ЗУБНАЯ ФОРМУЛА <span>FDI</span></div><div className="tooth-map"><div className="arch-line" />{toothIds.map((id, index) => <button key={id} className={`tooth tooth-${index} ${selected.includes(id) ? 'chosen' : ''}`} onClick={() => toggleTooth(id)}>{id}<span /></button>)}</div><div className="selected-teeth"><span>Выбрано</span><b>{selected.join(', ') || 'Нет зубов'}</b></div><div className="selection-hint"><MousePointer2 size={13} /> Выберите зуб на модели или схеме</div>
         <div className="section-heading">КОНСТРУКЦИЯ</div><div className="construction-options">{['Коронка', 'Винир', 'Накладка'].map(item => <button key={item} onClick={() => { setConstruction(item); setValidated(false); }} className={construction === item ? 'selected' : ''}><span className="radio" />{item}</button>)}</div><div className="left-bottom"><ShieldCheck size={17} /><div><b>Инженерный прототип</b><p>Демо-геометрия. Не для клинического применения.</p></div></div>
       </aside>
-      <section className="center-panel"><div className="view-presets"><span className="preset-kicker">РЕЖИМ</span>{presets.map(preset => <button key={preset.id} className={activePreset === preset.id ? 'active' : ''} disabled={preset.id === 'anatomy' && Boolean(imported) || preset.id === 'teeth' && Boolean(imported) || preset.id === 'preparation' && !targetImported} title={preset.id === 'teeth' && imported ? 'Для изоляции зубов требуется сегментация исходного скана' : preset.description} onClick={() => applyPreset(preset.id)}>{preset.label}{preset.id === 'anatomy' && Boolean(imported) && <span className="preset-unavailable">Нет данных</span>}</button>)}</div><div className="viewer" ref={viewerRef}><Workspace selected={selected} onSelect={toggleTooth} burTooth={burTooth} slotCounts={slotCounts} activeSlot={effectiveSlot} mode={displayMode} translucent={translucent} sourceOpacity={sourceOpacity} guideOpacity={guideOpacity} wireframe={wireframe} settings={settings} guide={guide} layers={layers} layerOpacities={layerOpacities} layerLocks={layerLocks} tool={cadTool} cameraAction={cameraAction} sectionEnabled={sectionEnabled} sectionOffset={sectionOffset} heatmap={heatmap} collision={collision} playing={playing} progress={progress} view={view} onViewChange={setView} guideRef={guideRef} imported={imported} targetImported={targetImported} targetTransform={bestFit?.matrix ?? null} opacity={opacity} alignmentMatrix={alignmentMatrix} registrationMode={registrationMode} onPickScanPoint={pt => { setScanPoints(prev => [...prev, pt]); setRegStatus("picking"); }} onPickGuidePoint={pt => { setGuidePoints(prev => [...prev, pt]); setRegStatus("picking"); }} scanMarkers={scanPoints} guideMarkers={guidePoints} />
+      <section className="center-panel"><div className="view-presets"><span className="preset-kicker">РЕЖИМ</span>{presets.map(preset => <button key={preset.id} className={activePreset === preset.id ? 'active' : ''} disabled={preset.id === 'anatomy' && Boolean(imported) || preset.id === 'teeth' && Boolean(imported) || preset.id === 'preparation' && !targetImported} title={preset.id === 'teeth' && imported ? 'Для изоляции зубов требуется сегментация исходного скана' : preset.description} onClick={() => applyPreset(preset.id)}>{preset.label}{preset.id === 'anatomy' && Boolean(imported) && <span className="preset-unavailable">Нет данных</span>}</button>)}</div><div className="viewer" ref={viewerRef}><Workspace selected={selected} onSelect={toggleTooth} burTooth={burTooth} slotCounts={slotCounts} activeSlot={effectiveSlot} mode={displayMode} translucent={translucent} sourceOpacity={sourceOpacity} guideOpacity={guideOpacity} wireframe={wireframe} settings={settings} guide={guide} layers={layers} layerOpacities={layerOpacities} layerLocks={layerLocks} tool={cadTool} cameraAction={cameraAction} sectionEnabled={sectionEnabled} sectionOffset={sectionOffset} heatmap={heatmap} collision={collision} playing={playing} progress={progress} view={view} onViewChange={setView} guideRef={guideRef} imported={imported} targetImported={targetImported} targetTransform={bestFit?.matrix ?? null} opacity={opacity} alignmentMatrix={alignmentMatrix} registrationMode={registrationMode} onPickScanPoint={pt => setReg(current => addScanPoint(current, pt))} onPickGuidePoint={pt => setReg(current => addGuidePoint(current, pt))} scanMarkers={scanPoints} guideMarkers={guidePoints} />
         <div className="viewer-top"><div className="view-tabs"><button className="active" onClick={() => setView('Перспектива')}><Box size={14} /> 3D View</button><button className={sectionEnabled ? 'active' : ''} onClick={() => setSectionEnabled(!sectionEnabled)}><ScanLine size={14} /> Сечение</button></div><select value={view} onChange={event => setView(event.target.value)}>{['Перспектива', 'Сверху', 'Спереди', 'Сбоку', 'Сзади / изнутри', 'Окклюзионный'].map(item => <option key={item}>{item}</option>)}</select></div>
         <div className="viewer-tools"><button className={cadTool === 'rotate' ? 'active' : ''} onClick={() => setCadTool('rotate')} title="Rotate · вращение"><Rotate3D size={18} /></button><button className={cadTool === 'pan' ? 'active' : ''} onClick={() => setCadTool('pan')} title="Pan · перемещение"><Move size={18} /></button><button className={cadTool === 'zoom' ? 'active' : ''} onClick={() => setCadTool('zoom')} title="Zoom · масштабирование"><ZoomIn size={18} /></button><span /><button onClick={() => cameraCommand('fit')} title="Fit to model · вписать модель"><Crosshair size={18} /></button><button className={sectionEnabled ? 'active' : ''} onClick={() => setSectionEnabled(!sectionEnabled)} title="Section · сечение поверхностной сетки"><Scissors size={17} /></button><button onClick={toggleTransparency} title="Transparency · прозрачность активного слоя"><Sliders size={17} /></button><span /><button onClick={() => { setView('Перспектива'); cameraCommand('reset'); }} title="Reset View"><RotateCcw size={17} /></button><button onClick={() => viewerRef.current?.requestFullscreen()} title="Полный экран"><Maximize size={17} /></button></div><div className="viewport-utility"><button className="sidebar-toggle" title={sidebarHidden ? 'Показать Layers' : 'Скрыть Layers'} onClick={() => setSidebarHidden(!sidebarHidden)}>{sidebarHidden ? <PanelRightOpen size={15} /> : <PanelRightClose size={15} />}{sidebarHidden ? 'Слои' : ''}</button></div><div className="viewport-zoom"><button onClick={() => cameraCommand('zoom-in')} title="Приблизить"><Plus size={15} /></button><button onClick={() => cameraCommand('zoom-out')} title="Отдалить"><span>−</span></button></div>{sectionEnabled && <div className="section-control"><div><Scissors size={13} /><b>Сечение X</b><span>{sectionOffset.toFixed(1)} мм</span><button onClick={() => setSectionEnabled(false)} title="Закрыть сечение"><X size={13} /></button></div><input aria-label="Положение секущей плоскости" type="range" min="-25" max="25" step=".1" value={sectionOffset} onChange={event => setSectionOffset(Number(event.target.value))} /><small>Срез поверхности · внутренние структуры неизвестны</small></div>}
         {layers.roots && !imported && <div className="roots-demo-notice">ДЕМО-КОРНИ · НЕ ДАННЫЕ ПАЦИЕНТА</div>}<div className="model-label"><span /> Нижняя челюсть <small>{imported ? 'Импортированный STL / PLY' : 'Анатомическая демо-модель · 14 зубов'} · Контактный шаблон</small></div>
@@ -178,23 +206,29 @@ export default function App() {
         {heatmap && <div className="heatmap-legend"><b>Демо-карта препарирования</b><div /><span>0.0 мм <i /> 2.0 мм</span></div>}
       </div>
       
-      <div className="registration-panel" style={{position:'absolute', top:80, right:20, background:'#1e2329', padding:12, borderRadius:8, zIndex:10, width:280, fontSize:13}}>
+      <div className="registration-panel" style={{position:'absolute', top:80, right:20, background:'#1e2329', padding:12, borderRadius:8, zIndex:10, width:300, fontSize:13}}>
         <b>Совмещение со сканом (MVP)</b>
         <div style={{marginTop:8}}>
-          <button className="wide-secondary" onClick={() => { setRegistrationMode(true); setScanPoints([]); setGuidePoints([]); setAlignmentMatrix(null); setAlignmentResult(null); setRegStatus('picking'); notify('Режим совмещения: кликайте сначала точки на скане (красные), затем соответствующие на направляющей (бирюзовые).'); }}>Начать совмещение</button>
-          <div style={{margin:'6px 0'}}>Скан: {scanPoints.length} · Направляющая: {guidePoints.length} · Пар: {Math.min(scanPoints.length, guidePoints.length)} (мин. 3)</div>
-          <button className="wide-secondary" disabled={Math.min(scanPoints.length, guidePoints.length) < 3} onClick={() => {
-            const n = Math.min(scanPoints.length, guidePoints.length);
-            const src = guidePoints.slice(0, n);
-            const tgt = scanPoints.slice(0, n);
-            const res = alignPointsRigid(src, tgt);
-            if (res) { setAlignmentMatrix(res.matrix); setAlignmentResult(res); setRegStatus('done'); notify(`Совмещение выполнено. RMSE: ${res.rmse.toFixed(3)} мм`); }
-            else { setRegStatus('error'); notify('Ошибка регистрации: недостаточно точек или вырожденная конфигурация'); }
+          <button className="wide-secondary" onClick={() => { setReg({ ...emptyRegistration(), registrationMode: true, regStatus: 'picking', pickPhase: 'scan' }); notify('Режим совмещения: сначала точка на скане, затем соответствующая на направляющей.'); }}>Начать совмещение</button>
+          <div style={{margin:'6px 0'}}>
+            Пар: {pairCount(reg)} · Следующая: {pickPhase === 'scan' ? 'скан' : 'направляющая'} · Пара №{pairCount(reg) + (hasIncompletePair(reg) ? 1 : 1)}
+          </div>
+          <div style={{margin:'4px 0', opacity:.85}}>Скан: {scanPoints.length} · Направляющая: {guidePoints.length}</div>
+          <button className="wide-secondary" disabled={!canCompute(reg)} onClick={() => {
+            const res = computeRegistration(guidePoints, scanPoints);
+            if (res) {
+              setReg(current => ({ ...current, alignmentMatrix: res.matrix, alignmentResult: res, regStatus: 'done', registrationMode: false }));
+              notify(`Совмещение выполнено. RMSE: ${res.rmse.toFixed(3)} мм · пар: ${res.pointCount}. Низкий RMSE не доказывает анатомическую посадку.`);
+            } else {
+              setReg(current => ({ ...current, alignmentMatrix: null, alignmentResult: null, regStatus: 'error' }));
+              notify('Ошибка регистрации: неполные пары, менее 3 неколлинеарных точек или некорректный результат');
+            }
           }}>Рассчитать совмещение</button>
+          <button className="wide-secondary" onClick={() => setReg(current => undoLastPair(current))} disabled={scanPoints.length === 0 && guidePoints.length === 0}>Отменить последнюю пару</button>
           <div>Статус: {regStatus === 'done' ? 'Выполнено' : regStatus === 'error' ? 'Ошибка' : regStatus === 'picking' ? 'Выбор точек' : 'Не выполнено'}</div>
-          {alignmentResult && <div>RMSE: {alignmentResult.rmse.toFixed(3)} мм</div>}
-          <button className="wide-secondary" onClick={() => { setAlignmentMatrix(null); setAlignmentResult(null); setScanPoints([]); setGuidePoints([]); setRegistrationMode(false); setRegStatus('idle'); }}>Сбросить совмещение</button>
-          <small style={{display:'block', marginTop:6, opacity:.7}}>Жёсткое совмещение. Не является анатомической адаптацией. Проверьте на реальном lower.stl.</small>
+          {alignmentResult && <div>RMSE: {alignmentResult.rmse.toFixed(3)} мм · пар: {alignmentResult.pointCount}</div>}
+          <button className="wide-secondary" onClick={() => setReg(resetRegistrationState())}>Сбросить совмещение</button>
+          <small style={{display:'block', marginTop:6, opacity:.7}}>Жёсткое совмещение (масштаб=1). Скан неподвижен. Не является анатомической адаптацией. Проверьте посадку отдельно на локальной модели.</small>
         </div>
       </div>
 <div className="analysis-toolbar"><button disabled title="Нет рассчитанной карты препарирования" className={heatmap ? 'enabled' : ''} onClick={() => setHeatmap(!heatmap)}><Layers size={15} /> Heatmap <span className="toggle" /></button><span className="toolbar-divider" /><button className={collision ? 'enabled' : ''} onClick={() => setCollision(!collision)}><ShieldCheck size={15} /> Collision Detection <span className="toggle" /></button><span className="collision-status"><span className={unsafe ? 'warning-dot' : ''} />{unsafe ? 'Требуется проверка' : 'Нет демо-коллизий'}</span><button className="settings-control" onClick={() => setModal('display')}><SlidersHorizontal size={16} /></button></div>
