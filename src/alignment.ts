@@ -7,18 +7,28 @@ export type AlignmentResult = {
 };
 
 /**
- * Rigid Kabsch / SVD alignment of corresponding points.
+ * Rigid Horn (quaternion) alignment of corresponding points.
  * Maps source points into target points: matrix * source ≈ target.
- * Scale is fixed to 1. Reflections are rejected (det(R) forced >= 0).
+ * Scale is fixed to 1. Reflections are rejected (largest eigenvalue of N
+ * corresponds to a proper rotation; we additionally verify det ≈ +1).
  * Units are assumed consistent (mm).
  *
- * Returns null if fewer than 3 points or geometrically degenerate.
+ * Algorithm: Horn 1987 — optimal quaternion from the 4×4 symmetric matrix N
+ * built from the covariance of centered point pairs. The quaternion is the
+ * eigenvector belonging to the largest eigenvalue of N.
+ *
+ * Returns null if fewer than 3 points, non-finite coordinates,
+ * or geometrically degenerate configuration.
  */
 export function alignPointsRigid(
   source: THREE.Vector3[],
   target: THREE.Vector3[],
 ): AlignmentResult | null {
-  if (source.length !== target.length || source.length < 3) return null;
+  if (!source || !target || source.length !== target.length || source.length < 3) return null;
+
+  for (let i = 0; i < source.length; i++) {
+    if (!isFiniteVec(source[i]) || !isFiniteVec(target[i])) return null;
+  }
 
   const n = source.length;
   const sourceMean = new THREE.Vector3();
@@ -30,40 +40,28 @@ export function alignPointsRigid(
   sourceMean.multiplyScalar(1 / n);
   targetMean.multiplyScalar(1 / n);
 
-  // Covariance matrix H = sum (source_i - mean) * (target_i - mean)^T
-  const H = [
-    [0, 0, 0],
-    [0, 0, 0],
-    [0, 0, 0],
-  ];
+  const sCentered: THREE.Vector3[] = [];
+  const tCentered: THREE.Vector3[] = [];
   for (let i = 0; i < n; i++) {
-    const s = source[i].clone().sub(sourceMean);
-    const t = target[i].clone().sub(targetMean);
-    H[0][0] += s.x * t.x; H[0][1] += s.x * t.y; H[0][2] += s.x * t.z;
-    H[1][0] += s.y * t.x; H[1][1] += s.y * t.y; H[1][2] += s.y * t.z;
-    H[2][0] += s.z * t.x; H[2][1] += s.z * t.y; H[2][2] += s.z * t.z;
+    sCentered.push(source[i].clone().sub(sourceMean));
+    tCentered.push(target[i].clone().sub(targetMean));
   }
 
-  // SVD of H via Three.js Matrix3 + external or simple power method? Three has no SVD.
-  // We'll use a minimal Jacobi or rely on a small implementation.
-  // For reliability, implement a simple SVD for 3x3 or use quaternion method similar to bestFit.
-  // Reuse the quaternion-based approach from bestFit for consistency (Horn method).
+  if (!hasSufficientSpan(sCentered)) return null;
 
+  // Covariance sums for Horn matrix N
   let sxx = 0, sxy = 0, sxz = 0;
   let syx = 0, syy = 0, syz = 0;
   let szx = 0, szy = 0, szz = 0;
   for (let i = 0; i < n; i++) {
-    const px = source[i].x - sourceMean.x;
-    const py = source[i].y - sourceMean.y;
-    const pz = source[i].z - sourceMean.z;
-    const qx = target[i].x - targetMean.x;
-    const qy = target[i].y - targetMean.y;
-    const qz = target[i].z - targetMean.z;
+    const px = sCentered[i].x, py = sCentered[i].y, pz = sCentered[i].z;
+    const qx = tCentered[i].x, qy = tCentered[i].y, qz = tCentered[i].z;
     sxx += px * qx; sxy += px * qy; sxz += px * qz;
     syx += py * qx; syy += py * qy; syz += py * qz;
     szx += pz * qx; szy += pz * qy; szz += pz * qz;
   }
 
+  // Horn 4×4 matrix N (symmetric)
   const N = [
     sxx + syy + szz, syz - szy, szx - sxz, sxy - syx,
     syz - szy, sxx - syy - szz, sxy + syx, szx + sxz,
@@ -71,27 +69,14 @@ export function alignPointsRigid(
     sxy - syx, szx + sxz, syz + szy, -sxx - syy + szz,
   ];
 
-  let q = [1, 0, 0, 0];
-  for (let k = 0; k < 30; k++) {
-    const next = [0, 0, 0, 0];
-    for (let row = 0; row < 4; row++) {
-      for (let col = 0; col < 4; col++) next[row] += N[row * 4 + col] * q[col];
-    }
-    const norm = Math.hypot(...next) || 1;
-    q = next.map(v => v / norm);
-  }
+  const q = largestEigenvector4(N);
+  if (!q) return null;
 
   const quaternion = new THREE.Quaternion(q[1], q[2], q[3], q[0]).normalize();
   const rotation = new THREE.Matrix4().makeRotationFromQuaternion(quaternion);
 
   // Reject reflection
-  const det = rotation.determinant();
-  if (det < 0) {
-    // Flip one axis
-    const correction = new THREE.Matrix4().makeScale(1, 1, -1);
-    rotation.multiply(correction);
-    quaternion.setFromRotationMatrix(rotation);
-  }
+  if (rotation.determinant() < 0.5) return null;
 
   const translation = targetMean.clone().sub(sourceMean.clone().applyQuaternion(quaternion));
   const matrix = new THREE.Matrix4().compose(translation, quaternion, new THREE.Vector3(1, 1, 1));
@@ -103,23 +88,76 @@ export function alignPointsRigid(
     errorSum += transformed.distanceToSquared(target[i]);
   }
   const rmse = Math.sqrt(errorSum / n);
-
-  // Degeneracy check: if points are nearly collinear
-  const variance = source.reduce((acc, p) => acc + p.distanceToSquared(sourceMean), 0) / n;
-  if (variance < 1e-6) return null;
+  if (!Number.isFinite(rmse)) return null;
 
   return { matrix, rmse, pointCount: n };
 }
 
-/**
- * Test helpers (not exported for production UI, but useful for verification).
- */
-export function identityTest() {
-  const pts = [
-    new THREE.Vector3(0, 0, 0),
-    new THREE.Vector3(1, 0, 0),
-    new THREE.Vector3(0, 1, 0),
-    new THREE.Vector3(0, 0, 1),
+function isFiniteVec(v: THREE.Vector3): boolean {
+  return Number.isFinite(v.x) && Number.isFinite(v.y) && Number.isFinite(v.z);
+}
+
+function hasSufficientSpan(centered: THREE.Vector3[]): boolean {
+  if (centered.length < 3) return false;
+  let sxx = 0, syy = 0, szz = 0, sxy = 0, sxz = 0, syz = 0;
+  for (const p of centered) {
+    sxx += p.x * p.x; syy += p.y * p.y; szz += p.z * p.z;
+    sxy += p.x * p.y; sxz += p.x * p.z; syz += p.y * p.z;
+  }
+  const nn = centered.length;
+  const trace = (sxx + syy + szz) / nn;
+  if (trace < 1e-8) return false;
+  const cov = [
+    sxx / nn, sxy / nn, sxz / nn,
+    sxy / nn, syy / nn, syz / nn,
+    sxz / nn, syz / nn, szz / nn,
   ];
-  return alignPointsRigid(pts, pts);
+  const det = cov[0] * (cov[4] * cov[8] - cov[5] * cov[7]) -
+              cov[1] * (cov[3] * cov[8] - cov[5] * cov[6]) +
+              cov[2] * (cov[3] * cov[7] - cov[4] * cov[6]);
+  return Math.abs(det) > Math.pow(trace, 3) * 1e-8;
+}
+
+/**
+ * Power iteration with occasional random restarts to find the dominant eigenvector of a 4×4 symmetric matrix.
+ * Sufficient for the Horn matrix when points are non-degenerate.
+ */
+function largestEigenvector4(N: number[]): number[] | null {
+  let bestQ: number[] | null = null;
+  let bestLambda = -Infinity;
+
+  // Try a few starting vectors
+  const starts = [
+    [1, 0, 0, 0],
+    [0, 1, 0, 0],
+    [0, 0, 1, 0],
+    [0, 0, 0, 1],
+    [0.5, 0.5, 0.5, 0.5],
+  ];
+
+  for (const start of starts) {
+    let q = start.slice();
+    for (let iter = 0; iter < 40; iter++) {
+      const next = [0, 0, 0, 0];
+      for (let row = 0; row < 4; row++) {
+        for (let col = 0; col < 4; col++) next[row] += N[row * 4 + col] * q[col];
+      }
+      const norm = Math.hypot(...next) || 1;
+      q = next.map(v => v / norm);
+    }
+    // Rayleigh quotient
+    let lambda = 0;
+    const nq = [0, 0, 0, 0];
+    for (let row = 0; row < 4; row++) {
+      for (let col = 0; col < 4; col++) nq[row] += N[row * 4 + col] * q[col];
+    }
+    for (let i = 0; i < 4; i++) lambda += q[i] * nq[i];
+    if (lambda > bestLambda) {
+      bestLambda = lambda;
+      bestQ = q;
+    }
+  }
+
+  if (!bestQ || !Number.isFinite(bestLambda)) return null;
+  return bestQ;
 }

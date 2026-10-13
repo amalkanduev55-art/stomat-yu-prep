@@ -182,7 +182,7 @@ export default function App() {
         <b>Совмещение со сканом (MVP)</b>
         <div style={{marginTop:8}}>
           <button className="wide-secondary" onClick={() => { setRegistrationMode(true); setScanPoints([]); setGuidePoints([]); setAlignmentMatrix(null); setAlignmentResult(null); setRegStatus('picking'); notify('Режим совмещения: кликайте сначала точки на скане (красные), затем соответствующие на направляющей (бирюзовые).'); }}>Начать совмещение</button>
-          <div style={{margin:'6px 0'}}>Пар точек: {Math.min(scanPoints.length, guidePoints.length)} / мин. 3</div>
+          <div style={{margin:'6px 0'}}>Скан: {scanPoints.length} · Направляющая: {guidePoints.length} · Пар: {Math.min(scanPoints.length, guidePoints.length)} (мин. 3)</div>
           <button className="wide-secondary" disabled={Math.min(scanPoints.length, guidePoints.length) < 3} onClick={() => {
             const n = Math.min(scanPoints.length, guidePoints.length);
             const src = guidePoints.slice(0, n);
