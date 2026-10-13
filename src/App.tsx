@@ -13,6 +13,7 @@ import { toothIds } from './geometry';
 import { contactLayout, contactSlots, guideLayout, type SlotCounts } from './guideGeometry';
 import { bestFitRigid, type BestFitResult } from './bestFit';
 import { alignPointsRigid, type AlignmentResult } from './alignment';
+import { findGuideBody, prepareGuideGeometryForExport } from './exportGuide';
 import {
   emptyRegistration,
   resetRegistrationState,
@@ -162,21 +163,11 @@ export default function App() {
     const frame = guideRef.current;
     if (!frame) { notify('Направляющий не найден в сцене'); return; }
     frame.updateMatrixWorld(true);
-    // Export only the main guide body mesh with its world transform (includes alignmentMatrix).
-    // Channels (Lines), bur and stopper are not part of the printable shell in this MVP.
-    const bodies = frame.children.filter((child): child is THREE.Mesh => child instanceof THREE.Mesh && child.type === 'Mesh' && Boolean(child.geometry));
-    const body = bodies[0];
-    if (!body?.geometry) { notify('Корпус направляющего не найден'); return; }
-    const geometry = body.geometry.clone();
-    geometry.applyMatrix4(body.matrixWorld);
-    const pos = geometry.getAttribute('position');
-    for (let i = 0; i < pos.count; i++) {
-      if (!Number.isFinite(pos.getX(i)) || !Number.isFinite(pos.getY(i)) || !Number.isFinite(pos.getZ(i))) {
-        geometry.dispose();
-        notify('Экспорт отменён: некорректные координаты после трансформации');
-        return;
-      }
-    }
+    // Identify the printable body by stable name. Lines, bur and stopper are not exported.
+    const body = findGuideBody(frame);
+    if (!body) { notify('Корпус направляющего не найден'); return; }
+    const geometry = prepareGuideGeometryForExport(body);
+    if (!geometry) { notify('Экспорт отменён: некорректная геометрия после трансформации'); return; }
     const exportMesh = new THREE.Mesh(geometry);
     const data = new STLExporter().parse(exportMesh, { binary: true });
     geometry.dispose();
