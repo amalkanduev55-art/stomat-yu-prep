@@ -150,3 +150,55 @@ describe('export geometry after transform', () => {
     expect(p0.distanceTo(scan[0])).toBeLessThan(1e-3);
   });
 });
+
+describe('registration result invalidation', () => {
+  const points = [
+    new THREE.Vector3(0, 0, 0),
+    new THREE.Vector3(10, 0, 0),
+    new THREE.Vector3(0, 10, 0),
+  ];
+
+  it('clears calculated transform when a new scan point is picked', () => {
+    let state = emptyRegistration();
+    state = addScanPoint(state, points[0]);
+    state = addGuidePoint(state, points[0]);
+    state = addScanPoint(state, points[1]);
+    state = addGuidePoint(state, points[1]);
+    state = addScanPoint(state, points[2]);
+    state = addGuidePoint(state, points[2]);
+    const result = computeRegistration(state.guidePoints, state.scanPoints);
+    expect(result).not.toBeNull();
+    state = { ...state, alignmentMatrix: result!.matrix, alignmentResult: result, regStatus: 'done' };
+    state = addScanPoint(state, new THREE.Vector3(4, 4, 4));
+    expect(state.alignmentMatrix).toBeNull();
+    expect(state.alignmentResult).toBeNull();
+    expect(state.regStatus).toBe('picking');
+  });
+
+  it('clears calculated transform when undoing the last pair', () => {
+    let state = emptyRegistration();
+    state = addScanPoint(state, points[0]);
+    state = addGuidePoint(state, points[0]);
+    state = addScanPoint(state, points[1]);
+    state = addGuidePoint(state, points[1]);
+    state = addScanPoint(state, points[2]);
+    state = addGuidePoint(state, points[2]);
+    const result = computeRegistration(state.guidePoints, state.scanPoints);
+    expect(result).not.toBeNull();
+    state = { ...state, alignmentMatrix: result!.matrix, alignmentResult: result, regStatus: 'done', registrationMode: false };
+    state = undoLastPair(state);
+    expect(state.alignmentMatrix).toBeNull();
+    expect(state.alignmentResult).toBeNull();
+    expect(state.registrationMode).toBe(true);
+    expect(state.regStatus).toBe('picking');
+    expect(state.scanPoints).toHaveLength(2);
+    expect(state.guidePoints).toHaveLength(2);
+  });
+
+  it('ignores non-finite picks', () => {
+    const state = emptyRegistration();
+    const invalid = addScanPoint(state, new THREE.Vector3(Number.NaN, 0, 0));
+    expect(invalid).toBe(state);
+    expect(invalid.scanPoints).toHaveLength(0);
+  });
+});
