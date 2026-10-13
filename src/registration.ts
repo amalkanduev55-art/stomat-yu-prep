@@ -43,10 +43,20 @@ export function canCompute(state: RegistrationState): boolean {
   return !hasIncompletePair(state) && pairCount(state) >= 3;
 }
 
+function isFinitePoint(point: THREE.Vector3): boolean {
+  return Number.isFinite(point.x) && Number.isFinite(point.y) && Number.isFinite(point.z);
+}
+
+/** Any edit to picks invalidates a previously calculated transform. */
+function invalidateResult(state: RegistrationState): Pick<RegistrationState, 'alignmentMatrix' | 'alignmentResult'> {
+  return { alignmentMatrix: null, alignmentResult: null };
+}
+
 export function addScanPoint(state: RegistrationState, point: THREE.Vector3): RegistrationState {
-  if (state.pickPhase !== 'scan') return state;
+  if (state.pickPhase !== 'scan' || !isFinitePoint(point)) return state;
   return {
     ...state,
+    ...invalidateResult(state),
     scanPoints: [...state.scanPoints, point.clone()],
     pickPhase: 'guide',
     regStatus: 'picking',
@@ -55,9 +65,10 @@ export function addScanPoint(state: RegistrationState, point: THREE.Vector3): Re
 }
 
 export function addGuidePoint(state: RegistrationState, point: THREE.Vector3): RegistrationState {
-  if (state.pickPhase !== 'guide') return state;
+  if (state.pickPhase !== 'guide' || !isFinitePoint(point)) return state;
   return {
     ...state,
+    ...invalidateResult(state),
     guidePoints: [...state.guidePoints, point.clone()],
     pickPhase: 'scan',
     regStatus: 'picking',
@@ -65,31 +76,42 @@ export function addGuidePoint(state: RegistrationState, point: THREE.Vector3): R
   };
 }
 
+/** Removes an unfinished scan pick, or the most recent complete pair. */
 export function undoLastPair(state: RegistrationState): RegistrationState {
   if (state.scanPoints.length === 0 && state.guidePoints.length === 0) return state;
+
   if (state.scanPoints.length > state.guidePoints.length) {
+    const scanPoints = state.scanPoints.slice(0, -1);
     return {
       ...state,
-      scanPoints: state.scanPoints.slice(0, -1),
+      ...invalidateResult(state),
+      scanPoints,
       pickPhase: 'scan',
-      regStatus: 'picking',
+      regStatus: scanPoints.length || state.guidePoints.length ? 'picking' : 'idle',
+      registrationMode: scanPoints.length > 0 || state.guidePoints.length > 0,
     };
   }
+
+  const scanPoints = state.scanPoints.slice(0, -1);
+  const guidePoints = state.guidePoints.slice(0, -1);
+  const hasPoints = scanPoints.length > 0 || guidePoints.length > 0;
   return {
     ...state,
-    scanPoints: state.scanPoints.slice(0, -1),
-    guidePoints: state.guidePoints.slice(0, -1),
+    ...invalidateResult(state),
+    scanPoints,
+    guidePoints,
     pickPhase: 'scan',
-    regStatus: state.scanPoints.length > 1 ? 'picking' : 'idle',
+    regStatus: hasPoints ? 'picking' : 'idle',
+    registrationMode: hasPoints,
   };
 }
 
 export function matrixIsFinite(matrix: THREE.Matrix4): boolean {
-  return matrix.elements.every(e => Number.isFinite(e));
+  return matrix.elements.every(Number.isFinite);
 }
 
 /**
- * Compute rigid alignment: guide local points -> stationary scan points.
+ * Compute rigid alignment: guide-local points -> stationary scan points.
  * Returns null on incomplete pairs, <3 points, degeneracy, non-finite result, or scaling.
  */
 export function computeRegistration(
@@ -97,12 +119,21 @@ export function computeRegistration(
   scanPoints: THREE.Vector3[],
 ): AlignmentResult | null {
   if (guidePoints.length !== scanPoints.length || guidePoints.length < 3) return null;
+  if (guidePoints.some(point => !isFinitePoint(point)) || scanPoints.some(point => !isFinitePoint(point))) return null;
+
   const res = alignPointsRigid(guidePoints, scanPoints);
-  if (!res) return null;
-  if (!Number.isFinite(res.rmse)) return null;
-  if (!matrixIsFinite(res.matrix)) return null;
+  if (!res || !Number.isFinite(res.rmse) || !matrixIsFinite(res.matrix)) return null;
+
+  const position = new THREE.Vector3();
+  const rotation = new THREE.Quaternion();
   const scale = new THREE.Vector3();
-  res.matrix.decompose(new THREE.Vector3(), new THREE.Quaternion(), scale);
-  if (Math.abs(scale.x - 1) > 1e-4 || Math.abs(scale.y - 1) > 1e-4 || Math.abs(scale.z - 1) > 1e-4) return null;
+  res.matrix.decompose(position, rotation, scale);
+  if (
+    Math.abs(scale.x - 1) > 1e-4 ||
+    Math.abs(scale.y - 1) > 1e-4 ||
+    Math.abs(scale.z - 1) > 1e-4 ||
+    Math.abs(rotation.length() - 1) > 1e-4
+  ) return null;
+
   return res;
 }
