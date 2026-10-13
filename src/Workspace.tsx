@@ -95,7 +95,7 @@ function Model(props: Props & { mode: DisplayMode; translucent: boolean }) {
     {showTeeth && !fragment && props.layers.target && props.targetImported && <mesh geometry={props.targetImported} matrixAutoUpdate={false} matrix={props.targetTransform ?? new THREE.Matrix4()}><meshStandardMaterial color="#6da5a2" transparent opacity={props.opacity / 100} side={THREE.DoubleSide} depthWrite={false} /></mesh>}
     {showTeeth && !props.imported && props.layers.supports && !fragment && layout.supports.map(index => <mesh key={`support-${index}`} geometry={crowns[index]} position={toothPosition(index)} rotation={[0, (index - 6.5) * .215, 0]} scale={1.013}><meshStandardMaterial color="#6e9cba" transparent opacity={props.layerOpacities.supports / 100} depthWrite={false} /></mesh>)}
     <group ref={props.guideRef} name="guide-frame" visible={showGuide} position={props.alignmentMatrix ? [0,0,0] : [pose.x, lifted + pose.y, pose.z]} rotation={props.alignmentMatrix ? [0,0,0] : [pose.rx, pose.ry, pose.rz]} matrix={props.alignmentMatrix ?? undefined} matrixAutoUpdate={!props.alignmentMatrix}>
-      {layout.working.length > 0 && <mesh name="guide-body" geometry={guideGeometry} onClick={event => { event.stopPropagation(); if (props.registrationMode && props.onPickGuidePoint && props.guideRef.current) { const local = props.guideRef.current.worldToLocal(event.point.clone()); props.onPickGuidePoint(local); } }}><meshPhysicalMaterial color="#edc832" roughness={.28} metalness={0} clearcoat={.3} transparent={props.guideOpacity < 100} opacity={props.guideOpacity / 100} side={THREE.DoubleSide} depthWrite={props.guideOpacity === 100} /></mesh>}
+      {layout.working.length > 0 && <mesh name="guide-body" geometry={guideGeometry} onClick={event => { event.stopPropagation(); if (props.registrationMode && props.onPickGuidePoint && props.guideRef.current) { props.guideRef.current.updateWorldMatrix(true, false); const local = props.guideRef.current.worldToLocal(event.point.clone()); props.onPickGuidePoint(local); } }}><meshPhysicalMaterial color="#edc832" roughness={.28} metalness={0} clearcoat={.3} transparent={props.guideOpacity < 100} opacity={props.guideOpacity / 100} side={THREE.DoubleSide} depthWrite={props.guideOpacity === 100} /></mesh>}
 
         {showBur && <group ref={bur}>
         {props.settings.totalLength > props.settings.length && <mesh position={[0, (props.settings.totalLength - props.settings.length) / 2, 0]}><cylinderGeometry args={[props.settings.shaft / 2, props.settings.shaft / 2, props.settings.totalLength - props.settings.length, 32]} /><meshStandardMaterial color="#b9c3ca" metalness={.85} roughness={.22} transparent={props.layerOpacities.bur < 100} opacity={props.layerOpacities.bur / 100} /></mesh>}
@@ -116,13 +116,13 @@ function Model(props: Props & { mode: DisplayMode; translucent: boolean }) {
 
 
 
-    {props.registrationMode && props.scanMarkers && props.scanMarkers.map((pt, i) => (
+    {(props.registrationMode || Boolean(props.scanMarkers?.length)) && props.scanMarkers && props.scanMarkers.map((pt, i) => (
       <mesh key={`scan-m-${i}`} position={pt}>
         <sphereGeometry args={[0.6, 12, 12]} />
         <meshBasicMaterial color="#ff6b6b" />
       </mesh>
     ))}
-    {props.registrationMode && props.guideMarkers && props.guideRef.current && props.guideMarkers.map((pt, i) => {
+    {(props.registrationMode || Boolean(props.guideMarkers?.length)) && props.guideMarkers && props.guideRef.current && props.guideMarkers.map((pt, i) => {
       const world = pt.clone().applyMatrix4(props.guideRef.current!.matrixWorld);
       return (
         <mesh key={`guide-m-${i}`} position={world}>
