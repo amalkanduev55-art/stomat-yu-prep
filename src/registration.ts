@@ -48,7 +48,7 @@ function isFinitePoint(point: THREE.Vector3): boolean {
 }
 
 /** Any edit to picks invalidates a previously calculated transform. */
-function invalidateResult(state: RegistrationState): Pick<RegistrationState, 'alignmentMatrix' | 'alignmentResult'> {
+function invalidateResult(): Pick<RegistrationState, 'alignmentMatrix' | 'alignmentResult'> {
   return { alignmentMatrix: null, alignmentResult: null };
 }
 
@@ -56,7 +56,7 @@ export function addScanPoint(state: RegistrationState, point: THREE.Vector3): Re
   if (state.pickPhase !== 'scan' || !isFinitePoint(point)) return state;
   return {
     ...state,
-    ...invalidateResult(state),
+    ...invalidateResult(),
     scanPoints: [...state.scanPoints, point.clone()],
     pickPhase: 'guide',
     regStatus: 'picking',
