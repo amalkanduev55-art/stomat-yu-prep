@@ -208,15 +208,23 @@ export default function App() {
           <button className="wide-secondary" disabled={!canCompute(reg)} onClick={() => {
             const res = computeRegistration(guidePoints, scanPoints);
             if (res) {
+              const accepted = window.confirm(
+                `Предварительное совмещение рассчитано.\\nRMSE: ${res.rmse.toFixed(3)} мм · пар: ${res.pointCount}.\\n\\nRMSE оценивает только совпадение выбранных точек и не подтверждает анатомическую посадку или клиническую безопасность. Проверьте модель отдельно.\\n\\nПрименить матрицу к направляющей?`
+              );
+              if (!accepted) {
+                setReg(current => ({ ...current, alignmentMatrix: null, alignmentResult: res, regStatus: 'ready', registrationMode: true }));
+                notify('Матрица не применена. Проверьте точки и результат.');
+                return;
+              }
               setReg(current => ({ ...current, alignmentMatrix: res.matrix, alignmentResult: res, regStatus: 'done', registrationMode: false }));
-              notify(`Совмещение выполнено. RMSE: ${res.rmse.toFixed(3)} мм · пар: ${res.pointCount}. Низкий RMSE не доказывает анатомическую посадку.`);
+              notify(`Матрица применена. RMSE: ${res.rmse.toFixed(3)} мм · пар: ${res.pointCount}. Проверьте посадку отдельно.`);
             } else {
               setReg(current => ({ ...current, alignmentMatrix: null, alignmentResult: null, regStatus: 'error' }));
               notify('Ошибка регистрации: неполные пары, менее 3 неколлинеарных точек или некорректный результат');
             }
           }}>Рассчитать совмещение</button>
           <button className="wide-secondary" onClick={() => setReg(current => undoLastPair(current))} disabled={scanPoints.length === 0 && guidePoints.length === 0}>Отменить последнюю пару</button>
-          <div>Статус: {regStatus === 'done' ? 'Выполнено' : regStatus === 'error' ? 'Ошибка' : regStatus === 'picking' ? 'Выбор точек' : 'Не выполнено'}</div>
+          <div>Статус: {regStatus === 'done' ? 'Применено — требуется проверка' : regStatus === 'ready' ? 'Рассчитано, не применено' : regStatus === 'error' ? 'Ошибка' : regStatus === 'picking' ? 'Выбор точек' : 'Не выполнено'}</div>
           {alignmentResult && <div>RMSE: {alignmentResult.rmse.toFixed(3)} мм · пар: {alignmentResult.pointCount}</div>}
           <button className="wide-secondary" onClick={() => setReg(resetRegistrationState())}>Сбросить совмещение</button>
           <small style={{display:'block', marginTop:6, opacity:.7}}>Жёсткое совмещение (масштаб=1). Скан неподвижен. Не является анатомической адаптацией. Проверьте посадку отдельно на локальной модели.</small>
