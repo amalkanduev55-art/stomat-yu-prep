@@ -13,7 +13,7 @@ export type CameraAction = { id: number; action: 'fit' | 'reset' | 'zoom-in' | '
 export type CadTool = 'rotate' | 'pan' | 'zoom';
 
 export type Settings = { diameter: number; length: number; shaft: number; totalLength: number; stopper: number; stopperInner: number; stopperShape: number; stopperEnabled: number; stopperHeight: number; stopperPosition: number; clearance: number; wall: number; angle: number; profile: number };
-type Props = { selected: number[]; onSelect: (id: number) => void; burTooth: number | null; slotCounts: SlotCounts; activeSlot: number; mode: DisplayMode; translucent: boolean; sourceOpacity: number; guideOpacity: number; wireframe: boolean; settings: Settings; guide: number; layers: LayerVisibility; layerOpacities: LayerValues; layerLocks: LayerLocks; tool: CadTool; cameraAction: CameraAction; sectionEnabled: boolean; sectionOffset: number; heatmap: boolean; collision: boolean; playing: boolean; progress: number; view: string; onViewChange: (view: string) => void; guideRef: React.RefObject<THREE.Group | null>; imported: THREE.BufferGeometry | null; targetImported: THREE.BufferGeometry | null; targetTransform: THREE.Matrix4 | null; opacity: number; guidePose?: GuidePose };
+type Props = { selected: number[]; onSelect: (id: number) => void; burTooth: number | null; slotCounts: SlotCounts; activeSlot: number; mode: DisplayMode; translucent: boolean; sourceOpacity: number; guideOpacity: number; wireframe: boolean; settings: Settings; guide: number; layers: LayerVisibility; layerOpacities: LayerValues; layerLocks: LayerLocks; tool: CadTool; cameraAction: CameraAction; sectionEnabled: boolean; sectionOffset: number; heatmap: boolean; collision: boolean; playing: boolean; progress: number; view: string; onViewChange: (view: string) => void; guideRef: React.RefObject<THREE.Group | null>; imported: THREE.BufferGeometry | null; targetImported: THREE.BufferGeometry | null; targetTransform: THREE.Matrix4 | null; opacity: number; guidePose?: GuidePose; alignmentMatrix?: THREE.Matrix4 | null; registrationMode?: boolean; onPickScanPoint?: (point: THREE.Vector3) => void; onPickGuidePoint?: (point: THREE.Vector3) => void; scanMarkers?: THREE.Vector3[]; guideMarkers?: THREE.Vector3[] };
 export type DisplayMode = 'installed' | 'detached' | 'guide' | 'fragment' | 'teeth';
 export type GuidePose = { x: number; y: number; z: number; rx: number; ry: number; rz: number };
 export const identityGuidePose: GuidePose = { x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0 };
@@ -86,7 +86,7 @@ function Model(props: Props & { mode: DisplayMode; translucent: boolean }) {
   return <group name="cad-model">
     {showTeeth && props.layers.roots && !props.imported && toothIds.map((id, index) => fragment && index !== firstIndex ? null : <group key={`roots-${id}`} name={`demo-roots-${id}`} position={fragment ? [0, 0, 0] : toothPosition(index)} rotation={[0, fragment ? 0 : (index - 6.5) * .215, 0]}>{roots[index].map((geometry, rootIndex) => <group key={rootIndex}><mesh geometry={geometry}><meshStandardMaterial color="#d6c6a5" roughness={.72} transparent={props.layerOpacities.roots < 100} opacity={props.layerOpacities.roots / 100} depthWrite={props.layerOpacities.roots === 100} /></mesh>{props.wireframe && <mesh geometry={geometry}><meshBasicMaterial color="#7d7057" wireframe transparent opacity={.12} /></mesh>}</group>)}</group>)}
     {showTeeth && props.layers.gum && !props.imported && !fragment && <group><mesh geometry={gingiva}><meshPhysicalMaterial vertexColors roughness={.5} clearcoat={.16} clearcoatRoughness={.45} side={THREE.DoubleSide} transparent={props.layerOpacities.gum < 100} opacity={props.layerOpacities.gum / 100} /></mesh>{props.wireframe && <mesh geometry={gingiva}><meshBasicMaterial color="#934e60" wireframe transparent opacity={.08} /></mesh>}</group>}
-    {showTeeth && props.layers.original && (props.imported && !fragment ? <group><mesh geometry={props.imported}><meshStandardMaterial color={props.imported.getAttribute('color') ? '#ffffff' : '#d8dbd6'} vertexColors={Boolean(props.imported.getAttribute('color'))} roughness={.65} side={THREE.DoubleSide} transparent={props.sourceOpacity < 100} opacity={props.sourceOpacity / 100} /></mesh>{props.wireframe && <mesh geometry={props.imported}><meshBasicMaterial color="#7a8f9d" wireframe transparent opacity={.18} /></mesh>}</group> : toothIds.map((id, index) => fragment && index !== firstIndex ? null : <group key={id} position={fragment ? [0, 0, 0] : toothPosition(index)} rotation={[0, fragment ? 0 : (index - 6.5) * .215, 0]}>
+    {showTeeth && props.layers.original && (props.imported && !fragment ? <group><mesh geometry={props.imported} onClick={event => { event.stopPropagation(); if (props.registrationMode && props.onPickScanPoint) props.onPickScanPoint(event.point.clone()); }}><meshStandardMaterial color={props.imported.getAttribute('color') ? '#ffffff' : '#d8dbd6'} vertexColors={Boolean(props.imported.getAttribute('color'))} roughness={.65} side={THREE.DoubleSide} transparent={props.sourceOpacity < 100} opacity={props.sourceOpacity / 100} /></mesh>{props.wireframe && <mesh geometry={props.imported}><meshBasicMaterial color="#7a8f9d" wireframe transparent opacity={.18} /></mesh>}</group> : toothIds.map((id, index) => fragment && index !== firstIndex ? null : <group key={id} position={fragment ? [0, 0, 0] : toothPosition(index)} rotation={[0, fragment ? 0 : (index - 6.5) * .215, 0]}>
       {fragment && props.layers.gum && <mesh position={[0, -2.4, 0]} scale={[2.8, 2.3, 3]}><sphereGeometry args={[1, 32, 24]} /><meshPhysicalMaterial color="#d28b8c" roughness={.5} clearcoat={.16} /></mesh>}
       <mesh geometry={crowns[index]} onClick={event => { event.stopPropagation(); if (!props.layerLocks.original) props.onSelect(id); }}><meshPhysicalMaterial vertexColors color="#ffffff" roughness={.4} metalness={0} clearcoat={.2} clearcoatRoughness={.3} transparent={props.sourceOpacity < 100} opacity={props.sourceOpacity / 100} /></mesh>
       {props.wireframe && <mesh geometry={crowns[index]}><meshBasicMaterial color="#82939b" wireframe transparent opacity={.12} /></mesh>}
@@ -94,8 +94,8 @@ function Model(props: Props & { mode: DisplayMode; translucent: boolean }) {
     </group>))}
     {showTeeth && !fragment && props.layers.target && props.targetImported && <mesh geometry={props.targetImported} matrixAutoUpdate={false} matrix={props.targetTransform ?? new THREE.Matrix4()}><meshStandardMaterial color="#6da5a2" transparent opacity={props.opacity / 100} side={THREE.DoubleSide} depthWrite={false} /></mesh>}
     {showTeeth && !props.imported && props.layers.supports && !fragment && layout.supports.map(index => <mesh key={`support-${index}`} geometry={crowns[index]} position={toothPosition(index)} rotation={[0, (index - 6.5) * .215, 0]} scale={1.013}><meshStandardMaterial color="#6e9cba" transparent opacity={props.layerOpacities.supports / 100} depthWrite={false} /></mesh>)}
-    <group ref={props.guideRef} name="guide-frame" visible={showGuide} position={[pose.x, lifted + pose.y, pose.z]} rotation={[pose.rx, pose.ry, pose.rz]}>
-      {layout.working.length > 0 && <mesh geometry={guideGeometry}><meshPhysicalMaterial color="#edc832" roughness={.28} metalness={0} clearcoat={.3} transparent={props.guideOpacity < 100} opacity={props.guideOpacity / 100} side={THREE.DoubleSide} depthWrite={props.guideOpacity === 100} /></mesh>}
+    <group ref={props.guideRef} name="guide-frame" visible={showGuide} position={props.alignmentMatrix ? [0,0,0] : [pose.x, lifted + pose.y, pose.z]} rotation={props.alignmentMatrix ? [0,0,0] : [pose.rx, pose.ry, pose.rz]} matrix={props.alignmentMatrix ?? undefined} matrixAutoUpdate={!props.alignmentMatrix}>
+      {layout.working.length > 0 && <mesh geometry={guideGeometry} onClick={event => { event.stopPropagation(); if (props.registrationMode && props.onPickGuidePoint && props.guideRef.current) { const local = props.guideRef.current.worldToLocal(event.point.clone()); props.onPickGuidePoint(local); } }}><meshPhysicalMaterial color="#edc832" roughness={.28} metalness={0} clearcoat={.3} transparent={props.guideOpacity < 100} opacity={props.guideOpacity / 100} side={THREE.DoubleSide} depthWrite={props.guideOpacity === 100} /></mesh>}
 
         {showBur && <group ref={bur}>
         {props.settings.totalLength > props.settings.length && <mesh position={[0, (props.settings.totalLength - props.settings.length) / 2, 0]}><cylinderGeometry args={[props.settings.shaft / 2, props.settings.shaft / 2, props.settings.totalLength - props.settings.length, 32]} /><meshStandardMaterial color="#b9c3ca" metalness={.85} roughness={.22} transparent={props.layerOpacities.bur < 100} opacity={props.layerOpacities.bur / 100} /></mesh>}
@@ -115,6 +115,22 @@ function Model(props: Props & { mode: DisplayMode; translucent: boolean }) {
     </group>
 
 
+
+    {props.registrationMode && props.scanMarkers && props.scanMarkers.map((pt, i) => (
+      <mesh key={`scan-m-${i}`} position={pt}>
+        <sphereGeometry args={[0.6, 12, 12]} />
+        <meshBasicMaterial color="#ff6b6b" />
+      </mesh>
+    ))}
+    {props.registrationMode && props.guideMarkers && props.guideRef.current && props.guideMarkers.map((pt, i) => {
+      const world = pt.clone().applyMatrix4(props.guideRef.current!.matrixWorld);
+      return (
+        <mesh key={`guide-m-${i}`} position={world}>
+          <sphereGeometry args={[0.6, 12, 12]} />
+          <meshBasicMaterial color="#4ecdc4" />
+        </mesh>
+      );
+    })}
   </group>;
 }
 function CameraControl({ view, mode, tool, command }: { view: string; mode: DisplayMode; tool: CadTool; command: CameraAction }) {
