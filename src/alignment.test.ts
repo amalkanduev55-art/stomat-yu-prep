@@ -235,6 +235,103 @@ describe('alignPointsRigid', () => {
     expect(res!.rmse).toBeLessThan(1e-15);
   });
 
+
+  it('Jacobi: symmetric matrix with tau===0 and non-zero off-diagonal', () => {
+    // Matrix where a_qq === a_pp for a pair, so tau=0, but apq != 0
+    // Should still zero the off-diagonal correctly
+    const src = [
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(0, 1, 0),
+    ];
+    // Rotation that can produce such intermediate state; just verify end-to-end
+    const m = new THREE.Matrix4().makeRotationZ(Math.PI / 4);
+    const tgt = applyRigid(src, m);
+    const res = alignPointsRigid(src, tgt);
+    expect(res).not.toBeNull();
+    expect(res!.rmse).toBeLessThan(1e-6);
+    expect(Number.isFinite(res!.rmse)).toBe(true);
+  });
+
+  it('correct alignment at small scales with non-zero rotation', () => {
+    // 1e-6 and smaller hit double-precision limits in the covariance/Horn matrix (entries ~1e-12)
+    const scales = [1e-4, 1e-3, 1e-2];
+    for (const s of scales) {
+      const src = [
+        new THREE.Vector3(0, 0, 0).multiplyScalar(s),
+        new THREE.Vector3(1, 0, 0).multiplyScalar(s),
+        new THREE.Vector3(0, 1, 0).multiplyScalar(s),
+        new THREE.Vector3(0.3, 0.4, 0).multiplyScalar(s),
+      ];
+      const m = new THREE.Matrix4().makeRotationZ(0.7).setPosition(s * 0.1, -s * 0.05, 0);
+      const tgt = applyRigid(src, m);
+      const res = alignPointsRigid(src, tgt);
+      expect(res).not.toBeNull();
+      expect(res!.rmse / s).toBeLessThan(1e-5);
+      expect(Number.isFinite(res!.matrix.elements[0])).toBe(true);
+    }
+  });
+
+  it('correct alignment at large scales', () => {
+    const scales = [1e3, 1e5, 1e7];
+    for (const s of scales) {
+      const src = basePoints.map(p => p.clone().multiplyScalar(s));
+      const m = fixedRotations[0].clone().setPosition(s * 2, -s * 1, s * 0.5);
+      const tgt = applyRigid(src, m);
+      const res = alignPointsRigid(src, tgt);
+      expect(res).not.toBeNull();
+      expect(res!.rmse / s).toBeLessThan(1e-4);
+      expect(Number.isFinite(res!.rmse)).toBe(true);
+    }
+  });
+
+  it('preserves three non-collinear and planar support after Jacobi fix', () => {
+    const three = [
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(2, 0, 0),
+      new THREE.Vector3(0, 3, 0),
+    ];
+    const m3 = new THREE.Matrix4().makeRotationY(0.5).setPosition(1, 1, 1);
+    expect(alignPointsRigid(three, applyRigid(three, m3))!.rmse).toBeLessThan(1e-5);
+
+    const planar = [
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(4, 0, 0),
+      new THREE.Vector3(0, 4, 0),
+      new THREE.Vector3(1, 2, 0),
+      new THREE.Vector3(3, 1, 0),
+    ];
+    const mp = new THREE.Matrix4().makeRotationX(0.3).setPosition(-2, 0, 5);
+    expect(alignPointsRigid(planar, applyRigid(planar, mp))!.rmse).toBeLessThan(1e-4);
+  });
+
+  it('still rejects collinear and near-collinear after Jacobi fix', () => {
+    const col = [
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(5, 0, 0),
+      new THREE.Vector3(10, 0, 0),
+    ];
+    expect(alignPointsRigid(col, col)).toBeNull();
+
+    const near = [
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(2, 1e-9, 0),
+      new THREE.Vector3(3, -2e-9, 0),
+    ];
+    expect(alignPointsRigid(near, near)).toBeNull();
+  });
+
+  it('finite matrix and RMSE on valid inputs', () => {
+    const m = fixedRotations[2].clone().setPosition(10, -5, 2);
+    const tgt = applyRigid(basePoints, m);
+    const res = alignPointsRigid(basePoints, tgt)!;
+    expect(Number.isFinite(res.rmse)).toBe(true);
+    for (const e of res.matrix.elements) {
+      expect(Number.isFinite(e)).toBe(true);
+    }
+  });
+
   it('order of pairs does not matter', () => {
     const m = fixedRotations[2].clone().setPosition(2, 3, -1);
     const target = applyRigid(basePoints, m);
@@ -249,3 +346,4 @@ describe('alignPointsRigid', () => {
     expect(a.distanceTo(b)).toBeLessThan(1e-3);
   });
 });
+
