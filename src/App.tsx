@@ -60,7 +60,7 @@ export default function App() {
   const [layerLocks, setLayerLocks] = useState<LayerLocks>(initialLocks);
   const [activeLayer, setActiveLayer] = useState<LayerId>('guide');
   const [sidebarTab, setSidebarTab] = useState<'layers' | 'parameters'>('layers');
-  const [sidebarHidden, setSidebarHidden] = useState(false);
+  const [sidebarHidden, setSidebarHidden] = useState(true);
   const [activePreset, setActivePreset] = useState('custom');
   const [cadTool, setCadTool] = useState<CadTool>('rotate');
   const [cameraAction, setCameraAction] = useState<CameraAction>({ id: 0, action: 'fit' });
