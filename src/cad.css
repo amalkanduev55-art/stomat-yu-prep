@@ -316,3 +316,11 @@
 .cad-theme .template-status>div span { color:#91a7b7; }
 .cad-theme .template-status>div b { color:#a9c8ba; font-weight:500; }
 .cad-theme .template-status small { display:block; margin-top:6px; color:#839aaa; font-size:7px; line-height:1.5; }
+
+.cad-theme .mesh-diagnostics-panel { display: grid; gap: 8px; margin: 12px 0; }
+.cad-theme .mesh-diagnostics { display: grid; gap: 7px; padding: 11px 12px; border: 1px solid #3a4652; background: #202730; border-radius: 4px; font-size: 10px; }
+.cad-theme .mesh-diagnostics > b { color: #d6e1e9; font-size: 11px; }
+.cad-theme .mesh-diagnostics > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 5px 12px; }
+.cad-theme .mesh-diagnostics span, .cad-theme .mesh-diagnostics-panel > p { color: #94a5b4; }
+.cad-theme .mesh-diagnostics strong { color: #c5d8d7; font: 10px 'JetBrains Mono', monospace; }
+.cad-theme .mesh-diagnostics-panel > p { margin: 0; font-size: 10px; line-height: 1.5; }
