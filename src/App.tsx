@@ -45,6 +45,7 @@ function MeshDiagnostics({ label, geometry }: { label: string; geometry: THREE.B
     <b>{label}</b>
     <div><span>Минимум X / Y / Z</span><strong>{fmt(box.min.x)} / {fmt(box.min.y)} / {fmt(box.min.z)} мм</strong></div>
     <div><span>Максимум X / Y / Z</span><strong>{fmt(box.max.x)} / {fmt(box.max.y)} / {fmt(box.max.z)} мм</strong></div>
+    <div><span>Вершины / треугольники</span><strong>{geometry.getAttribute('position').count.toLocaleString('ru-RU')} / {(geometry.index ? geometry.index.count : geometry.getAttribute('position').count) / 3 | 0}</strong></div>
     <div><span>Габариты X × Y × Z</span><strong>{fmt(size.x)} × {fmt(size.y)} × {fmt(size.z)} мм</strong></div>
     <div><span>Центр X / Y / Z</span><strong>{fmt(center.x)} / {fmt(center.y)} / {fmt(center.z)} мм</strong></div>
   </div>;
