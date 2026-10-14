@@ -385,3 +385,9 @@
 .landmark-align-result { display:grid; grid-template-columns:1fr 1fr; gap:5px 10px; margin-top:10px; font-size:11px; }
 .landmark-align-result b, .landmark-align-result small { grid-column:1 / -1; }
 .landmark-align-result small { color:var(--muted-foreground); line-height:1.4; }
+
+.orientation-preview-panel { margin: 12px 0; padding: 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); }
+.orientation-preview-panel > b { display:block; font-size:12px; }
+.orientation-preview-panel > p { margin:6px 0 9px; color:var(--muted-foreground); font-size:10px; line-height:1.45; }
+.orientation-preview-actions { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:5px; }
+.orientation-preview-actions .wide-secondary { min-width:0; padding:7px 3px; font-size:10px; }
