@@ -333,3 +333,18 @@
 .cad-theme .color-presets { display: flex; flex-wrap: wrap; gap: 5px; }
 .cad-theme .color-presets button { padding: 6px 8px; border: 1px solid #43515e; border-radius: 3px; color: #c3d0da; font-size: 9px; }
 .cad-theme .model-color-controls > small { color: #8fa0af; font-size: 9px; line-height: 1.5; }
+
+/* Right-side Layers / Parameters open as a compact overlay drawer. */
+.cad-theme .main-layout { position: relative; grid-template-columns: 208px minmax(360px,1fr); }
+.cad-theme .main-layout.layers-collapsed { grid-template-columns: 208px minmax(360px,1fr); }
+.cad-theme .right-panel { position: absolute; z-index: 20; top: 0; right: 0; bottom: 0; width: min(320px, 42vw); box-shadow: -12px 0 30px #00000045; }
+.cad-theme .layers-collapsed > .right-panel { display: none; }
+@media (min-width: 1550px) {
+  .cad-theme .main-layout, .cad-theme .main-layout.layers-collapsed { grid-template-columns: 225px minmax(420px,1fr); }
+}
+@media (max-width: 1100px) {
+  .cad-theme .main-layout, .cad-theme .main-layout.layers-collapsed { grid-template-columns: 185px minmax(300px,1fr); }
+}
+@media (max-width: 950px) {
+  .cad-theme .main-layout, .cad-theme .main-layout.layers-collapsed { grid-template-columns: minmax(350px,1fr); }
+}
