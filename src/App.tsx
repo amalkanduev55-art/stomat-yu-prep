@@ -9,7 +9,9 @@ import Workspace, { type CameraAction, type CadTool, type DisplayMode, type Sett
 import LayersPanel from './LayersPanel';
 import { availableLayers, initialLocks, initialOpacity, initialVisibility, presets, type LayerId, type LayerLocks, type LayerValues, type LayerVisibility } from './cadLayers';
 import { PanelRightClose, PanelRightOpen, Crosshair, Rotate3D, Sliders, Scissors } from 'lucide-react';
-import { toothIds } from './geometry';
+import { crownGeometry, toothIds, toothPosition } from './geometry';
+import gingivaGeometry from './gingivaGeometry';
+import rootGeometry from './rootGeometry';
 import { contactLayout, contactSlots, guideLayout, type SlotCounts } from './guideGeometry';
 import { bestFitRigid, type BestFitResult } from './bestFit';
 import { alignPointsRigid, type AlignmentResult } from './alignment';
@@ -158,6 +160,38 @@ export default function App() {
     setLayerOpacities(current => ({ ...current, [activeLayer]: current[activeLayer] === 100 ? 45 : 100 }));
   };
   const save = () => { localStorage.setItem('yu-prep-project', JSON.stringify({ settings, selected, slotCounts, project, construction })); notify('Версия проекта сохранена локально'); };
+  const exportDemoJawSTL = () => {
+    // Rebuild the same procedural demo anatomy rendered by Workspace: gingiva,
+    // every crown, and every root, with the same tooth transforms.
+    const anatomy = new THREE.Group();
+    anatomy.name = 'yu-prep-demo-anatomy';
+    anatomy.add(new THREE.Mesh(gingivaGeometry()));
+    toothIds.forEach((_, index) => {
+      const tooth = new THREE.Group();
+      tooth.name = `demo-tooth-${toothIds[index]}`;
+      tooth.position.set(...toothPosition(index));
+      tooth.rotation.y = (index - 6.5) * .215;
+      tooth.add(new THREE.Mesh(crownGeometry(index)));
+      rootGeometry(index).forEach(geometry => tooth.add(new THREE.Mesh(geometry)));
+      anatomy.add(tooth);
+    });
+    anatomy.updateMatrixWorld(true);
+    let data: ArrayBuffer;
+    try {
+      data = new STLExporter().parse(anatomy, { binary: true }) as ArrayBuffer;
+    } finally {
+      anatomy.traverse(object => {
+        if (object instanceof THREE.Mesh) object.geometry.dispose();
+      });
+    }
+    const url = URL.createObjectURL(new Blob([data], { type: 'application/octet-stream' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'YU-Prep-demo-jaw.stl';
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    notify('Экспортирована встроенная демо-анатомия: коронки, корни и десна. Костная основа в демо-геометрии отсутствует.');
+  };
   const exportOriginalSTL = () => {
     if (!imported) { notify('Сначала загрузите исходную модель в Original Model'); return; }
     // Export the imported scan geometry only; do not apply guide/target transforms or mutate the source.
@@ -169,7 +203,7 @@ export default function App() {
     anchor.download = 'lower-original.stl';
     anchor.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    notify('Исходная модель экспортирована в lower-original.stl');
+    notify('Импортированная модель экспортирована в lower-original.stl');
   };
   const exportSTL = () => {
     if (!validated || unsafe) { setStage(5); notify('Сначала выполните проверку геометрии'); return; }
@@ -196,7 +230,7 @@ export default function App() {
   };
   return <div className="app-shell cad-theme">
     <header className="topbar"><a className="brand" href="#" onClick={event => event.preventDefault()}><span className="brand-symbol">Y<span>U</span></span> YU-Prep <span className="beta">BETA</span></a><span className="top-divider" /><button className="project-picker" onClick={() => setModal('projects')}><FolderOpen size={16} /> {project} <ChevronDown size={14} /></button><span className="project-id">YU–024</span><div className="header-right"><span className="saved"><span /> Все изменения сохранены</span><button className="icon-button" onClick={save} title="Сохранить"><Save size={17} /></button><button className="icon-button" onClick={() => setModal('help')} title="Помощь"><CircleHelp size={18} /></button><span className="avatar">АК</span></div></header>
-    <div className="workflow"><div className="workspace-label"><Box size={18} /> CAD Workspace</div><div className="steps">{stages.map((name, index) => <button className={`step ${stage === index ? 'active' : ''} ${index < stage ? 'done' : ''}`} key={name} onClick={() => { setStage(index); setSidebarTab('parameters'); setSidebarHidden(false); }}><span>{index < stage ? <Check size={11} /> : index + 1}</span>{name}{index < 5 && <ChevronRight size={14} className="step-arrow" />}</button>)}</div><button className="export-button" onClick={exportSTL}><Download size={15} /> Экспорт прототипа</button><button className="export-button" onClick={exportOriginalSTL} disabled={!imported} title={imported ? "Скачать исходную сетку челюсти из Original Model" : "Сначала загрузите Original Model"}><Download size={15} /> Скачать исходную челюсть STL</button></div>
+    <div className="workflow"><div className="workspace-label"><Box size={18} /> CAD Workspace</div><div className="steps">{stages.map((name, index) => <button className={`step ${stage === index ? 'active' : ''} ${index < stage ? 'done' : ''}`} key={name} onClick={() => { setStage(index); setSidebarTab('parameters'); setSidebarHidden(false); }}><span>{index < stage ? <Check size={11} /> : index + 1}</span>{name}{index < 5 && <ChevronRight size={14} className="step-arrow" />}</button>)}</div><button className="export-button" onClick={exportSTL}><Download size={15} /> Экспорт прототипа</button><button className="export-button" onClick={exportDemoJawSTL} title="Скачать встроенную процедурную демо-анатомию"><Download size={15} /> Скачать демо-челюсть STL</button><button className="export-button" onClick={exportOriginalSTL} disabled={!imported} title={imported ? "Скачать импортированную сетку из Original Model" : "Сначала загрузите Original Model"}><Download size={15} /> Скачать импортированную STL</button></div>
     <main className={`main-layout ${sidebarHidden ? 'layers-collapsed' : ''}`}>
       <aside className="left-panel"><div className="panel-title">Проект <button className="icon-button" onClick={() => setModal('projects')}><Plus size={15} /></button></div><div className="project-detail"><div className="patient-icon"><FileBox size={20} /></div><div><b>Нижняя челюсть</b><small>Демо-кейс · Выбрано: {selected.length}</small></div></div><div className="section-heading">ОБЪЕКТЫ СЦЕНЫ <Layers size={13} /></div><div className="object-tree">{([['original', 'Original model', '#d7d2bd', files.original], ['target', 'Target model', '#71b9b0', files.target], ['guide', 'Контактный шаблон', '#e9c532', 'Навигационный шаблон'], ['bur', 'Бор и стоппер', '#a5afb8', 'Параметрический инструмент'], ['trajectory', 'Траектория', '#5b9cbe', 'Открытая направляющая']] as const).map(([key, title, color, subtitle]) => <div className={`object-row ${key === 'guide' ? 'highlight' : ''}`} key={key}><ChevronDown size={12} /><span className={`object-dot dot-${key}`} /><div><b>{title}</b><small>{subtitle}</small></div><button className="icon-button" disabled={!availability[key].available} onClick={() => toggleLayer(key)} title={availability[key].reason || 'Видимость'}>{layers[key] ? <Eye size={14} /> : <EyeOff size={14} />}</button></div>)}</div>
         <div className="section-heading tooth-heading">ЗУБНАЯ ФОРМУЛА <span>FDI</span></div><div className="tooth-map"><div className="arch-line" />{toothIds.map((id, index) => <button key={id} className={`tooth tooth-${index} ${selected.includes(id) ? 'chosen' : ''}`} onClick={() => toggleTooth(id)}>{id}<span /></button>)}</div><div className="selected-teeth"><span>Выбрано</span><b>{selected.join(', ') || 'Нет зубов'}</b></div><div className="selection-hint"><MousePointer2 size={13} /> Выберите зуб на модели или схеме</div>
