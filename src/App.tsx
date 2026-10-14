@@ -32,7 +32,8 @@ function ToothSelection({ selected, onToggle, onClear }: { selected: number[]; o
 }
 function MeshDiagnostics({ label, geometry }: { label: string; geometry: THREE.BufferGeometry | null }) {
   if (!geometry) return null;
-  const box = geometry.boundingBox ?? geometry.computeBoundingBox() && geometry.boundingBox;
+  if (!geometry.boundingBox) geometry.computeBoundingBox();
+  const box = geometry.boundingBox;
   if (!box) return null;
   const size = new THREE.Vector3();
   const center = new THREE.Vector3();
