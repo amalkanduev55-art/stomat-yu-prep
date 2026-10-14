@@ -20,10 +20,11 @@ export function getDemoToothArchBounds() {
 }
 
 /**
- * Force-fit an XY-oriented imported scan to the exact XYZ envelope of the built-in tooth arch.
- * The rotation maps the source XY footprint onto the target XZ footprint. Independent XYZ scaling
- * then matches all three target dimensions, and translation aligns the two bounding-box centers.
- * This is a visual envelope fit, not anatomical registration; independent scaling can distort anatomy.
+ * Visual fit of an XY-oriented imported scan to the built-in tooth arch.
+ * Rotate XY into XZ, fit the arch footprint in X/Z, preserve the scan's thickness
+ * (Y after rotation), then translate its bounding-box center to the target center.
+ * This deliberately avoids Y scaling, which can flatten tooth/gingiva volume.
+ * It is a visual fit, not anatomical registration; X/Z scaling can still distort anatomy.
  */
 export function fitScanToDemoToothArch(source: THREE.BufferGeometry) {
   if (!source.boundingBox) source.computeBoundingBox();
@@ -31,19 +32,19 @@ export function fitScanToDemoToothArch(source: THREE.BufferGeometry) {
   if (!sourceBounds || sourceBounds.isEmpty()) throw new Error('Не удалось определить габариты STL');
 
   const targetBounds = getDemoToothArchBounds();
-  // For the current scan convention, -90° around X maps the XY arch plane to XZ
-  // and maps source Z thickness to target Y height.
+  // For the current scan convention, -90° around X maps the XY arch plane to XZ.
   const rotation = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
   const rotatedBounds = sourceBounds.clone().applyMatrix4(rotation);
   const sourceSize = rotatedBounds.getSize(new THREE.Vector3());
   const targetSize = targetBounds.getSize(new THREE.Vector3());
-  if ([sourceSize.x, sourceSize.y, sourceSize.z, targetSize.x, targetSize.y, targetSize.z].some(v => v < 1e-6)) {
+  if ([sourceSize.x, sourceSize.y, sourceSize.z, targetSize.x, targetSize.z].some(v => v < 1e-6)) {
     throw new Error('У STL или встроенного зубного ряда слишком малый размер по одной из осей');
   }
 
+  // Match the arch footprint only. Preserve vertical thickness after rotation.
   const scale = new THREE.Vector3(
     targetSize.x / sourceSize.x,
-    targetSize.y / sourceSize.y,
+    1,
     targetSize.z / sourceSize.z,
   );
   const sourceCenter = rotatedBounds.getCenter(new THREE.Vector3());
