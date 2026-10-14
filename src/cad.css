@@ -348,3 +348,16 @@
 @media (max-width: 950px) {
   .cad-theme .main-layout, .cad-theme .main-layout.layers-collapsed { grid-template-columns: minmax(350px,1fr); }
 }
+
+/* Keep tooth formula, selected-tooth summary, and construction selector separated. */
+.cad-theme .left-panel { box-sizing: border-box; padding-bottom: 18px; }
+.cad-theme .tooth-heading { margin-top: 18px; margin-bottom: 10px; }
+.cad-theme .tooth-map { display: flex; flex-wrap: wrap; align-content: start; min-height: 94px; height: auto; margin: 0 12px 10px; transform: none; gap: 5px; }
+.cad-theme .tooth-map .tooth { flex: 0 0 calc(25% - 5px); min-width: 0; position: relative; }
+.cad-theme .selected-teeth { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; margin: 10px 13px 8px; min-height: 35px; line-height: 1.5; }
+.cad-theme .selected-teeth b { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.cad-theme .selection-hint { margin: 7px 13px 17px; line-height: 1.5; }
+.cad-theme .section-heading:not(.tooth-heading) { margin-top: 15px; margin-bottom: 9px; }
+.cad-theme .construction-options { display: grid; grid-template-columns: 1fr; gap: 6px; margin: 0 12px 16px; }
+.cad-theme .construction-options button { display: flex; align-items: center; min-height: 34px; gap: 9px; padding: 8px 10px; border: 1px solid #3b4957; border-radius: 4px; text-align: left; }
+.cad-theme .construction-options button.selected { border-color: #6b9288; }
