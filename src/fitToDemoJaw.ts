@@ -30,7 +30,9 @@ export function fitScanToDemoToothArch(source: THREE.BufferGeometry) {
   const sourceBounds = source.boundingBox;
   if (!sourceBounds || sourceBounds.isEmpty()) throw new Error('Не удалось определить габариты STL');
   const targetBounds = getDemoToothArchBounds();
-  const rotation = new THREE.Matrix4().makeRotationX(Math.PI / 2);
+  // For this scan convention, -90° keeps the occlusal surface above the jaw base.
+  // +90° inverted the vertical anatomy and made the lower jaw look like an upper jaw.
+  const rotation = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
   const rotatedBounds = sourceBounds.clone().applyMatrix4(rotation);
   const sourceSize = rotatedBounds.getSize(new THREE.Vector3());
   const targetSize = targetBounds.getSize(new THREE.Vector3());
@@ -51,5 +53,5 @@ export function fitScanToDemoToothArch(source: THREE.BufferGeometry) {
     .multiply(new THREE.Matrix4().makeScale(scale.x, scale.y, scale.z))
     .multiply(new THREE.Matrix4().makeTranslation(-sourceCenter.x, -sourceCenter.y, -sourceCenter.z))
     .multiply(rotation);
-  return { matrix, scale, sourceBounds: sourceBounds.clone(), targetBounds, rotationRadians: Math.PI / 2 };
+  return { matrix, scale, sourceBounds: sourceBounds.clone(), targetBounds, rotationRadians: -Math.PI / 2 };
 }
