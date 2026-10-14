@@ -58,6 +58,31 @@ describe('alignPointsRigid', () => {
     }
   });
 
+  it('180-degree orientation check around vertical Y axis with translation', () => {
+    const expected = new THREE.Matrix4()
+      .makeRotationY(Math.PI)
+      .setPosition(4, -2, 7);
+    const target = applyRigid(basePoints, expected);
+    const res = alignPointsRigid(basePoints, target);
+
+    expect(res).not.toBeNull();
+    expect(res!.rmse).toBeLessThan(1e-4);
+    expect(res!.matrix.determinant()).toBeCloseTo(1, 3);
+
+    for (let i = 0; i < basePoints.length; i++) {
+      const mapped = basePoints[i].clone().applyMatrix4(res!.matrix);
+      expect(mapped.distanceTo(target[i])).toBeLessThan(1e-3);
+    }
+
+    const actualRotation = new THREE.Quaternion().setFromRotationMatrix(
+      new THREE.Matrix4().extractRotation(res!.matrix),
+    );
+    const expectedRotation = new THREE.Quaternion().setFromRotationMatrix(
+      new THREE.Matrix4().extractRotation(expected),
+    );
+    expect(actualRotation.angleTo(expectedRotation)).toBeLessThan(1e-4);
+  });
+
   it('rotation + translation (fixed)', () => {
     for (const r of fixedRotations) {
       for (const t of fixedTranslations) {
