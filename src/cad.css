@@ -38,8 +38,9 @@
 .cad-theme .step.done>span { background: #283c36; border-color: #3b574c; color: #98beb0; }
 .cad-theme .step-arrow { color: #586879; }
 .cad-theme .export-button { border-color: #4a5d67; background: #2e3d43; color: #d0e1e2; }
-.cad-theme .main-layout { grid-template-columns: 208px minmax(360px,1fr) 296px; }
+.cad-theme .main-layout { position: relative; grid-template-columns: 208px minmax(360px,1fr); }
 .cad-theme .main-layout.layers-collapsed { grid-template-columns: 208px minmax(360px,1fr); }
+.cad-theme .right-panel { position: absolute; z-index: 20; top: 0; right: 0; bottom: 0; width: min(320px, 42vw); box-shadow: -12px 0 30px #00000045; }
 .cad-theme .layers-collapsed>.right-panel { display: none; }
 .cad-theme .left-panel,.cad-theme .right-panel { background: #1b2129; border-color: var(--border); }
 .cad-theme .left-panel { overflow-y: auto; }
