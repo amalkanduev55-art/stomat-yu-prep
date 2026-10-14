@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - feat/stl-guide-alignment-mvp
+      - feat/export-original-stl
   pull_request:
     branches:
       - main
