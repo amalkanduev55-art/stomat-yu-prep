@@ -21,8 +21,9 @@ export function getDemoToothArchBounds() {
 
 /**
  * Force-fit an XY-oriented scan into the built-in tooth arch envelope.
- * Rotates source XY plane to target XZ plane, then independently scales X/Y/Z
- * in target coordinates to match the demo crown envelope. This may distort anatomy.
+ * Rotates source XY plane to target XZ plane, scales the arch footprint in X/Z,
+ * and preserves Y thickness after rotation to avoid flattening the scan. X/Z scaling
+ * may still distort anatomy and this is only a visual fit, not anatomical registration.
  */
 export function fitScanToDemoToothArch(source: THREE.BufferGeometry) {
   if (!source.boundingBox) source.computeBoundingBox();
@@ -36,9 +37,11 @@ export function fitScanToDemoToothArch(source: THREE.BufferGeometry) {
   if ([sourceSize.x, sourceSize.y, sourceSize.z].some(v => v < 1e-6)) {
     throw new Error('У STL слишком малый размер по одной из осей');
   }
+  // Match the arch footprint in X/Z but preserve the scan's vertical thickness
+  // after XY -> XZ rotation. Independent Y scaling was flattening the anatomy.
   const scale = new THREE.Vector3(
     targetSize.x / sourceSize.x,
-    targetSize.y / sourceSize.y,
+    1,
     targetSize.z / sourceSize.z,
   );
   const sourceCenter = rotatedBounds.getCenter(new THREE.Vector3());
