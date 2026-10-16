@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeVertices, toCreasedNormals } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 export type ScanGuideOptions = {
   /** Gap between the scan surface and the inner surface of the guide, mm (Settings.clearance). */
@@ -36,15 +37,17 @@ export type ScanGuideResult = {
 
 /** Fitted inner surfaces per scan and Offset, so changing the wall, slots or gum edge does not refit. */
 const fittedInner = new WeakMap<THREE.BufferGeometry, Map<string, { inner: Float32Array; minimumGap: number; coveredVertices: number }>>();
+/** Crease points per scan and placement (creasePoints), which do not depend on any guide setting. */
+const creaseCache = new WeakMap<THREE.BufferGeometry, Map<string, Float32Array>>();
 
 /**
  * Guide body built directly on the imported scan, in workspace coordinates (insertion axis = +Y).
  *
  * 1. Top envelope of the scan as a heightfield over XZ. Taking the highest surface at every XZ point
  *    blocks out all undercuts for a vertical insertion path, so the guide can be seated.
- * 2. Inner surface = envelope offset by `clearance`, outer surface = envelope offset by `clearance + wall`
- *    (Minkowski offset by a ball). The inner surface is then checked against the scan triangles and lifted only
- *    where it is closer than `clearance`, so the real gap is ≥ clearance and stays close to it.
+ * 2. Inner surface = envelope offset by `clearance` (Minkowski offset by a ball). It is then checked against the scan
+ *    triangles and lifted only where it is closer than `clearance`, so the real gap is ≥ clearance and stays close to
+ *    it. Outer surface = the fitted inner surface offset by `wall`.
  * 3. Its lower edge follows the gingival margin found on the scan (buccal and lingual separately), and along the
  *    arch it covers only `span`: the teeth being prepared plus the unprepared support teeth around them.
  * 4. Bur slots are cut across the arch at the requested interproximal contacts (detectScanContacts), down to a
@@ -98,10 +101,10 @@ export function buildScanGuide(source: THREE.BufferGeometry, transform: THREE.Ma
     }
   }
 
-  // 2. Offset of the region below the envelope by a ball of radius r. For the outer surface, distances are shortened
-  // by one cell diagonal, so the interpolated surface never dips below the true offset at steep walls. The inner
-  // surface starts without that slack and is then fitted to the scan triangles themselves (step 2b).
-  const offset = (radius: number, slack: number) => {
+  // 2. Offset of the region below a heightfield (the envelope by default) by a ball of radius r. For the outer surface,
+  // distances are shortened by one cell diagonal, so the interpolated surface never dips below the true offset at steep
+  // walls. The inner surface starts without that slack and is then fitted to the scan triangles themselves (step 2b).
+  const offset = (radius: number, slack: number, from = height) => {
     const reach = Math.ceil((radius + slack) / cell);
     const kernel: Array<[number, number, number]> = [];
     for (let dj = -reach; dj <= reach; dj++) for (let di = -reach; di <= reach; di++) {
@@ -110,7 +113,7 @@ export function buildScanGuide(source: THREE.BufferGeometry, transform: THREE.Ma
     }
     const result = new Float32Array(nx * nz).fill(-Infinity);
     for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
-      const h = height[at(i, j)];
+      const h = from[at(i, j)];
       if (h === -Infinity) continue;
       for (const [di, dj, lift] of kernel) {
         const ii = i + di, jj = j + dj;
@@ -121,7 +124,6 @@ export function buildScanGuide(source: THREE.BufferGeometry, transform: THREE.Ma
     }
     return result;
   };
-  const outer = offset(clearance + wall, cell * Math.SQRT2);
 
   // 2b. Exact fit on the triangles: the inner surface of the mesh (grid nodes, edge midpoints and triangle centres)
   // is checked against the true 3D distance to the scan triangles and lifted along +Y wherever it is closer than
@@ -193,6 +195,9 @@ export function buildScanGuide(source: THREE.BufferGeometry, transform: THREE.Ma
   }
   const inner = fitted.inner;
   const { minimumGap, coveredVertices } = fitted;
+  // Outer surface = the fitted inner surface offset by the wall, so wherever the fit lifted the inner surface (narrow
+  // grooves, steep walls) the wall keeps its full thickness instead of thinning out into holes.
+  const outer = offset(wall, cell * Math.SQRT2, inner);
 
   // 3. Occlusal plane y = p0 + p1·x + p2·z from local maxima (cusp tips), refit without low outliers.
   const peakReach = Math.round(2.5 / cell);
@@ -224,12 +229,23 @@ export function buildScanGuide(source: THREE.BufferGeometry, transform: THREE.Ma
   if (!arch.frames.length) { scan.dispose(); return null; }
   const contacts = arch.contacts;
 
-  // Gingival margin per arch sample and side. Undercuts are blocked out in the envelope, so walking outwards
-  // from the arch line the crown wall falls steeply and then meets the gum: the margin is the sharpest
-  // concave bend of that cross-section between 2.5 and 12 mm below the crown top.
-  const margins = arch.frames.map(({ point, normal }) => {
-    const crown = Math.max(...[-2, -1, 0, 1, 2].map(s => sample(point.x + normal.x * s, point.z + normal.z * s)));
-    return [-1, 1].map(side => {
+  // Gingival margin per arch sample and side: the crease where the gum meets the crown on the scan triangles
+  // (creaseMargins). Where none is found, the heightfield fallback: undercuts are blocked out in the envelope, so
+  // walking outwards from the arch line the crown wall falls steeply and then meets the gum, and the margin is the
+  // sharpest concave bend of that cross-section between 2.5 and 12 mm below the crown top.
+  const crowns = arch.frames.map(({ point, normal }) => Math.max(...[-2, -1, 0, 1, 2].map(s => sample(point.x + normal.x * s, point.z + normal.z * s))));
+  const creaseKey = transform ? transform.elements.join(',') : '';
+  let crease = creaseCache.get(source)?.get(creaseKey);
+  if (!crease) {
+    crease = creasePoints(scan);
+    if (!creaseCache.has(source)) creaseCache.set(source, new Map());
+    creaseCache.get(source)!.set(creaseKey, crease);
+  }
+  const creases = creaseMargins(crease, arch.frames, crowns);
+  const margins = arch.frames.map(({ point, normal }, frame) => {
+    const crown = crowns[frame];
+    return [-1, 1].map((side, n) => {
+      if (Number.isFinite(creases[frame][n])) return creases[frame][n];
       const profile: number[] = [];
       for (let s = 0; s <= 14; s += .2) profile.push(sample(point.x + normal.x * s * side, point.z + normal.z * s * side));
       const smooth = profile.map((_, k) => {
@@ -385,11 +401,125 @@ export function buildScanGuide(source: THREE.BufferGeometry, transform: THREE.Ma
 
   scan.dispose();
 
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(out, 3));
-  geometry.computeVertexNormals();
+  const faceted = new THREE.BufferGeometry();
+  faceted.setAttribute('position', new THREE.Float32BufferAttribute(out, 3));
+  // The grid steps on steep walls would show as stripes with flat shading: smooth normals across bends under 60°.
+  const geometry = toCreasedNormals(faceted, Math.PI / 3);
+  if (geometry !== faceted) faceted.dispose();
   geometry.computeBoundingBox();
   return { geometry, minimumGap, coveredVertices, cell, contacts: contacts.map((contact, n) => ({ ...contact, path: paths[n] })), slotsCut: slotContacts.length };
+}
+
+/**
+ * Sharp concave creases of the scan surface as flat [x, y, z, curvature, ...]. The gum meets the crown in such a
+ * crease, which is found on the triangles even where it lies in an undercut that the heightfield cannot see.
+ */
+function creasePoints(scan: THREE.BufferGeometry) {
+  const surface = scan.clone();
+  for (const name of Object.keys(surface.attributes)) if (name !== 'position') surface.deleteAttribute(name);
+  const merged = mergeVertices(surface, 1e-4);
+  surface.dispose();
+  merged.computeVertexNormals();
+  const position = merged.getAttribute('position'), normal = merged.getAttribute('normal'), index = merged.index;
+  if (!index) { merged.dispose(); return new Float32Array(0); }
+  // Mean concavity per vertex: how far its neighbours rise above its tangent plane, 2·(d·n)/|d|² (≈ 1/radius, mm⁻¹),
+  // then averaged over the triangle fan twice so single noisy vertices do not count as a crease.
+  let curvature = new Float32Array(position.count);
+  const weight = new Float32Array(position.count);
+  for (let t = 0; t < index.count; t += 3) for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) {
+    if (a === b) continue;
+    const i = index.getX(t + a), j = index.getX(t + b);
+    const dx = position.getX(j) - position.getX(i), dy = position.getY(j) - position.getY(i), dz = position.getZ(j) - position.getZ(i);
+    curvature[i] += 2 * (dx * normal.getX(i) + dy * normal.getY(i) + dz * normal.getZ(i)) / Math.max(1e-6, dx * dx + dy * dy + dz * dz);
+    weight[i]++;
+  }
+  for (let i = 0; i < curvature.length; i++) curvature[i] = weight[i] ? curvature[i] / weight[i] : 0;
+  // The open rim of the scan has half a fan and reads as a false crease: drop its vertices and two rings around them.
+  const edges = new Map<number, number>();
+  for (let t = 0; t < index.count; t += 3) for (let a = 0; a < 3; a++) {
+    const i = index.getX(t + a), j = index.getX(t + (a + 1) % 3);
+    const key = Math.min(i, j) * position.count + Math.max(i, j);
+    edges.set(key, (edges.get(key) ?? 0) + 1);
+  }
+  let rim = new Uint8Array(position.count);
+  edges.forEach((uses, key) => { if (uses === 1) { rim[Math.floor(key / position.count)] = 1; rim[key % position.count] = 1; } });
+  for (let ring = 0; ring < 2; ring++) {
+    const grown = rim.slice();
+    for (let t = 0; t < index.count; t += 3) {
+      const v = [index.getX(t), index.getX(t + 1), index.getX(t + 2)];
+      if (rim[v[0]] || rim[v[1]] || rim[v[2]]) for (const i of v) grown[i] = 1;
+    }
+    rim = grown;
+  }
+  for (let pass = 0; pass < 2; pass++) {
+    const sum = new Float32Array(position.count);
+    weight.fill(0);
+    for (let t = 0; t < index.count; t += 3) for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) {
+      const i = index.getX(t + a);
+      sum[i] += curvature[index.getX(t + b)];
+      weight[i]++;
+    }
+    curvature = sum.map((value, i) => weight[i] ? value / weight[i] : 0);
+  }
+  const points: number[] = [];
+  for (let v = 0; v < position.count; v++) if (curvature[v] >= .8 && !rim[v]) points.push(position.getX(v), position.getY(v), position.getZ(v), curvature[v]);
+  merged.dispose();
+  return new Float32Array(points);
+}
+
+/**
+ * Gingival margin from the crease points (creasePoints). For every arch frame and side (0 = −normal, 1 = +normal)
+ * returns the height of the lowest crease within ±0.75 mm of the frame's cross-section and 2.5–10 mm below the crown
+ * top (the curvature-weighted centre of its band), or NaN where there is none.
+ */
+function creaseMargins(points: Float32Array, frames: ArchFrame[], crowns: number[]) {
+  const result = frames.map(() => [NaN, NaN]);
+  if (frames.length < 2) return result;
+  const spacing = Math.max(1e-3, (frames[frames.length - 1].arc - frames[0].arc) / (frames.length - 1));
+  const reach = Math.max(1, Math.round(.75 / spacing));
+  // Every crease point with each frame whose cross-section it lies on, and the side of the arch it is on.
+  const visit = (each: (k: number, side: number, y: number, weight: number) => void) => {
+    for (let v = 0; v < points.length; v += 4) {
+      const x = points[v], y = points[v + 1], z = points[v + 2];
+      let nearest = 0, distance = Infinity;
+      for (let k = 0; k < frames.length; k += 4) {
+        const d = (frames[k].point.x - x) ** 2 + (frames[k].point.z - z) ** 2;
+        if (d < distance) { distance = d; nearest = k; }
+      }
+      for (let k = Math.max(0, nearest - 4); k <= Math.min(frames.length - 1, nearest + 4); k++) {
+        const d = (frames[k].point.x - x) ** 2 + (frames[k].point.z - z) ** 2;
+        if (d < distance) { distance = d; nearest = k; }
+      }
+      for (let k = Math.max(0, nearest - reach); k <= Math.min(frames.length - 1, nearest + reach); k++) {
+        const { point, tangent, normal: across } = frames[k];
+        const dx = x - point.x, dz = z - point.z;
+        if (Math.abs(dx * tangent.x + dz * tangent.z) > .75) continue;
+        const s = dx * across.x + dz * across.z, depth = crowns[k] - y;
+        if (Math.abs(s) > 14 || depth < 2.5 || depth > 10) continue;
+        each(k, s < 0 ? 0 : 1, y, points[v + 3]);
+      }
+    }
+  };
+  // The gum line runs on continuously along the arch, while creases on the gum below it (a ridge, a scan seam) are
+  // short: first the lowest crease per frame, then the same search limited to 1.5 mm below the median of those over
+  // ±4 mm of arch.
+  const lowestAbove = (limit: number[][]) => {
+    const lowest = frames.map(() => [Infinity, Infinity]);
+    visit((k, side, y) => { if (y >= limit[k][side] && y < lowest[k][side]) lowest[k][side] = y; });
+    return lowest;
+  };
+  const first = lowestAbove(frames.map(() => [-Infinity, -Infinity]));
+  const span = Math.round(4 / spacing);
+  const limit = frames.map((_, k) => [0, 1].map(side => {
+    const near = first.slice(Math.max(0, k - span), k + span + 1).map(sides => sides[side]).filter(Number.isFinite).sort((a, b) => a - b);
+    return near.length ? near[near.length >> 1] - 1.5 : -Infinity;
+  }));
+  // The smoothed crease is a band a few vertices wide: find its lowest point, then centre on the band above it.
+  const lowest = lowestAbove(limit);
+  const sum = frames.map(() => [0, 0]), total = frames.map(() => [0, 0]);
+  visit((k, side, y, weight) => { if (y <= lowest[k][side] + .6) { sum[k][side] += weight * y; total[k][side] += weight; } });
+  result.forEach((sides, k) => { for (const side of [0, 1]) if (total[k][side]) sides[side] = sum[k][side] / total[k][side]; });
+  return result;
 }
 
 /**
