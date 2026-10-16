@@ -312,6 +312,16 @@ export function buildScanGuide(source: THREE.BufferGeometry, transform: THREE.Ma
     const i = Math.round((x - x0) / cell), j = Math.round((z - z0) / cell);
     return i < 0 || j < 0 || i >= nx || j >= nz ? -Infinity : outer[at(i, j)];
   };
+  // Bilinear height of the outer surface (nearest node where a neighbour is missing), for smooth stopper paths.
+  const outerSmoothAt = (x: number, z: number) => {
+    const fx = (x - x0) / cell, fz = (z - z0) / cell;
+    const i = Math.floor(fx), j = Math.floor(fz);
+    if (i < 0 || j < 0 || i >= nx - 1 || j >= nz - 1) return outerAt(x, z);
+    const h = [outer[at(i, j)], outer[at(i + 1, j)], outer[at(i, j + 1)], outer[at(i + 1, j + 1)]];
+    if (h.some(value => value === -Infinity)) return outerAt(x, z);
+    const u = fx - i, v = fz - j;
+    return h[0] * (1 - u) * (1 - v) + h[1] * u * (1 - v) + h[2] * (1 - u) * v + h[3] * u * v;
+  };
   // Path of the stopper over the guide surface next to each contact, from one side of the arch to the other.
   const paths = contacts.map(({ point, normal, frame }) => {
     const floor = Math.min(...gum[frame]) + gumOffset + rim;
@@ -319,11 +329,23 @@ export function buildScanGuide(source: THREE.BufferGeometry, transform: THREE.Ma
     let from = 0, to = 0;
     while (from > -12 && reachable(from - cell)) from -= cell;
     while (to < 12 && reachable(to + cell)) to += cell;
-    return Array.from({ length: 65 }, (_, n) => {
+    const raw = Array.from({ length: 65 }, (_, n) => {
       const s = from + (to - from) * n / 64;
       const x = point.x + normal.x * s, z = point.z + normal.z * s;
-      return new THREE.Vector3(x, outerAt(x, z), z);
+      return new THREE.Vector3(x, outerSmoothAt(x, z), z);
     });
+    // The surface is a 0.25 mm grid, so its profile is stepped: smooth the heights (binomial passes), then lift the
+    // smoothed profile by its own smoothed deficit so the stopper rides on the guide instead of sinking into it.
+    const smooth = (values: number[], passes: number) => {
+      let current = values;
+      for (let pass = 0; pass < passes; pass++) current = current.map((value, n) => n === 0 || n === current.length - 1 ? value : (current[n - 1] + 2 * value + current[n + 1]) / 4);
+      return current;
+    };
+    const heights = raw.map(point => point.y);
+    const smoothed = smooth(heights, 6);
+    const lift = smooth(heights.map((height, n) => Math.max(0, height - smoothed[n])), 3);
+    const deficit = Math.max(0, ...heights.map((height, n) => height - smoothed[n] - lift[n]));
+    return raw.map((point, n) => point.clone().setY(smoothed[n] + lift[n] + deficit));
   });
 
   // Node heights of the body: top = outer offset, bottom = inner offset clipped by the gingival floor.

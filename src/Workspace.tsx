@@ -80,7 +80,7 @@ function Model(props: Props & { mode: DisplayMode; translucent: boolean }) {
     const travel = props.playing ? (Math.sin(clock.elapsedTime * 1.4) + 1) / 2 : props.progress / 100;
     const pathAngle = -1.42 + 2.84 * travel;
     const contact = guideLocalPoint(pathAngle);
-    const tangent = guideLocalPoint(pathAngle + .001).sub(guideLocalPoint(pathAngle - .001)).normalize();
+    const tangent = scanContact && !fragment ? scanPathTangent(scanContact.path, pathAngle) : guideLocalPoint(pathAngle + .001).sub(guideLocalPoint(pathAngle - .001)).normalize();
     const insertion = new THREE.Vector3().crossVectors(tangent, scanContact ? scanContact.tangent : new THREE.Vector3(1, 0, 0));
     if (insertion.lengthSq() < 1e-8) insertion.crossVectors(tangent, new THREE.Vector3(0, 0, 1));
     insertion.normalize();
@@ -140,9 +140,18 @@ function Model(props: Props & { mode: DisplayMode; translucent: boolean }) {
 }
 /** Point on a scan stopper path; crossAngle −1.42…1.42 spans the path like the demo guide's cross angle. */
 function scanPathPoint(path: THREE.Vector3[], crossAngle: number) {
-  const t = THREE.MathUtils.clamp((crossAngle + 1.42) / 2.84, 0, 1) * (path.length - 1);
-  const n = Math.min(path.length - 2, Math.floor(t));
-  return path[n].clone().lerp(path[n + 1], t - n);
+  return pathCurve(path).getPointAt(THREE.MathUtils.clamp((crossAngle + 1.42) / 2.84, 0, 1));
+}
+/** Unit tangent of a scan stopper path at the same parameter as scanPathPoint. */
+function scanPathTangent(path: THREE.Vector3[], crossAngle: number) {
+  return pathCurve(path).getTangentAt(THREE.MathUtils.clamp((crossAngle + 1.42) / 2.84, 0, 1));
+}
+// Smooth curve through the path points (constant speed by arc length), so the bur does not snap at each point.
+const pathCurves = new WeakMap<THREE.Vector3[], THREE.CatmullRomCurve3>();
+function pathCurve(path: THREE.Vector3[]) {
+  let curve = pathCurves.get(path);
+  if (!curve) { curve = new THREE.CatmullRomCurve3(path, false, 'centripetal'); curve.arcLengthDivisions = 400; pathCurves.set(path, curve); }
+  return curve;
 }
 function CameraControl({ view, mode, tool, command }: { view: string; mode: DisplayMode; tool: CadTool; command: CameraAction }) {
   const controls = useRef<any>(null);
