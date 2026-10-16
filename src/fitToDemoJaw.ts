@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { crownGeometry, toothIds, toothPosition } from './geometry';
+import { scanToWorkspaceRotation } from './scanOrientation';
 
 /** Bounds of the built-in tooth arch only. Surgical guide, bur slots and drill are intentionally excluded. */
 export function getDemoToothArchBounds() {
@@ -21,7 +22,7 @@ export function getDemoToothArchBounds() {
 
 /**
  * Visual fit of an XY-oriented imported scan to the built-in tooth arch.
- * Rotate XY into XZ, fit the arch footprint in X/Z, preserve the scan's thickness
+ * Rotate XY into XZ (scanToWorkspaceRotation), fit the arch footprint in X/Z, preserve the scan's thickness
  * (Y after rotation), then translate its bounding-box center to the target center.
  * This deliberately avoids Y scaling, which can flatten tooth/gingiva volume.
  * It is a visual fit, not anatomical registration; X/Z scaling can still distort anatomy.
@@ -32,8 +33,8 @@ export function fitScanToDemoToothArch(source: THREE.BufferGeometry) {
   if (!sourceBounds || sourceBounds.isEmpty()) throw new Error('Не удалось определить габариты STL');
 
   const targetBounds = getDemoToothArchBounds();
-  // For the current scan convention, -90° around X maps the XY arch plane to XZ.
-  const rotation = new THREE.Matrix4().makeRotationX(-Math.PI / 2);
+  // Same orientation as on import: XY arch plane → XZ, occlusal up, anterior teeth in front.
+  const rotation = scanToWorkspaceRotation();
   const rotatedBounds = sourceBounds.clone().applyMatrix4(rotation);
   const sourceSize = rotatedBounds.getSize(new THREE.Vector3());
   const targetSize = targetBounds.getSize(new THREE.Vector3());
@@ -60,6 +61,5 @@ export function fitScanToDemoToothArch(source: THREE.BufferGeometry) {
     scale,
     sourceBounds: sourceBounds.clone(),
     targetBounds,
-    rotationRadians: -Math.PI / 2,
   };
 }
