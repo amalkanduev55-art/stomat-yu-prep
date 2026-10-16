@@ -23,8 +23,9 @@ export type ScanGuideOptions = {
 
 export type ScanGuideResult = {
   geometry: THREE.BufferGeometry;
-  /** Smallest vertical gap between a covered scan vertex and the inner guide surface, mm. */
+  /** Smallest 3D distance between the fitted inner surface and the scan triangles, mm. */
   minimumGap: number;
+  /** Points of the inner surface within clearance + 0.05 mm of the scan (the seating contact area). */
   coveredVertices: number;
   cell: number;
   /** Interproximal contacts found on the scan, with the stopper path over the guide next to each. */
@@ -33,13 +34,17 @@ export type ScanGuideResult = {
   slotsCut: number;
 };
 
+/** Fitted inner surfaces per scan and Offset, so changing the wall, slots or gum edge does not refit. */
+const fittedInner = new WeakMap<THREE.BufferGeometry, Map<string, { inner: Float32Array; minimumGap: number; coveredVertices: number }>>();
+
 /**
  * Guide body built directly on the imported scan, in workspace coordinates (insertion axis = +Y).
  *
  * 1. Top envelope of the scan as a heightfield over XZ. Taking the highest surface at every XZ point
  *    blocks out all undercuts for a vertical insertion path, so the guide can be seated.
  * 2. Inner surface = envelope offset by `clearance`, outer surface = envelope offset by `clearance + wall`
- *    (Minkowski offset by a ball, made conservative by one grid cell, so the real gap is ≥ clearance).
+ *    (Minkowski offset by a ball). The inner surface is then checked against the scan triangles and lifted only
+ *    where it is closer than `clearance`, so the real gap is ≥ clearance and stays close to it.
  * 3. Its lower edge follows the gingival margin found on the scan (buccal and lingual separately), and along the
  *    arch it covers only `span`: the teeth being prepared plus the unprepared support teeth around them.
  * 4. Bur slots are cut across the arch at the requested interproximal contacts (detectScanContacts), down to a
@@ -59,7 +64,8 @@ export function buildScanGuide(source: THREE.BufferGeometry, transform: THREE.Ma
   const position = scan.getAttribute('position');
   if (!bounds || !position || bounds.isEmpty()) { scan.dispose(); return null; }
 
-  const margin = clearance + wall + 2 * cell;
+  // The grid does not depend on the wall (up to 3 mm), so the fitted inner surface can be reused when only it changes.
+  const margin = clearance + Math.max(3, wall) + 2 * cell;
   const x0 = bounds.min.x - margin, z0 = bounds.min.z - margin;
   const nx = Math.ceil((bounds.max.x + margin - x0) / cell) + 1;
   const nz = Math.ceil((bounds.max.z + margin - z0) / cell) + 1;
@@ -92,10 +98,10 @@ export function buildScanGuide(source: THREE.BufferGeometry, transform: THREE.Ma
     }
   }
 
-  // 2. Offset of the region below the envelope by a ball of radius r. Distances are shortened by one cell
-  // diagonal, so the surface interpolated between grid nodes never dips below the true offset at steep walls.
-  const slack = cell * Math.SQRT2;
-  const offset = (radius: number) => {
+  // 2. Offset of the region below the envelope by a ball of radius r. For the outer surface, distances are shortened
+  // by one cell diagonal, so the interpolated surface never dips below the true offset at steep walls. The inner
+  // surface starts without that slack and is then fitted to the scan triangles themselves (step 2b).
+  const offset = (radius: number, slack: number) => {
     const reach = Math.ceil((radius + slack) / cell);
     const kernel: Array<[number, number, number]> = [];
     for (let dj = -reach; dj <= reach; dj++) for (let di = -reach; di <= reach; di++) {
@@ -115,8 +121,78 @@ export function buildScanGuide(source: THREE.BufferGeometry, transform: THREE.Ma
     }
     return result;
   };
-  const inner = offset(clearance);
-  const outer = offset(clearance + wall);
+  const outer = offset(clearance + wall, cell * Math.SQRT2);
+
+  // 2b. Exact fit on the triangles: the inner surface of the mesh (grid nodes, edge midpoints and triangle centres)
+  // is checked against the true 3D distance to the scan triangles and lifted along +Y wherever it is closer than
+  // `clearance`. Lifting only, so the gap is never smaller than the Offset and no larger than the fit needs.
+  const probe = new THREE.Vector3(), away = new THREE.Vector3();
+  // Points of the triangulated surface over the cells that pass `use`: nodes, edge midpoints, triangle centres.
+  // Each sample is a flat [node, weight, node, weight, ...] list; every point is listed once.
+  const surfaceSamples = (use: (i: number, j: number) => boolean) => {
+    const list: number[][] = [];
+    const listed = new Uint8Array(nx * nz * 6);
+    const add = (key: number, sample: number[]) => { if (!listed[key]) { listed[key] = 1; list.push(sample); } };
+    for (let j = 0; j < nz - 1; j++) for (let i = 0; i < nx - 1; i++) {
+      if (!use(i, j)) continue;
+      const p = at(i, j), q = at(i + 1, j), r = at(i + 1, j + 1), s = at(i, j + 1);
+      for (const k of [p, q, r, s]) add(6 * k, [k, 1]);
+      add(6 * p + 1, [p, .5, q, .5]); add(6 * p + 2, [p, .5, s, .5]); add(6 * q + 2, [q, .5, r, .5]); add(6 * s + 1, [s, .5, r, .5]);
+      add(6 * p + 3, [p, .5, r, .5]);
+      add(6 * p + 4, [p, 1 / 3, q, 1 / 3, r, 1 / 3]); add(6 * p + 5, [p, 1 / 3, r, 1 / 3, s, 1 / 3]);
+    }
+    return list;
+  };
+  const place = (sample: number[], heights: Float32Array) => {
+    probe.set(0, 0, 0);
+    for (let n = 0; n < sample.length; n += 2) {
+      const k = sample[n], w = sample[n + 1];
+      probe.x += w * (x0 + (k % nx) * cell); probe.y += w * heights[k]; probe.z += w * (z0 + Math.floor(k / nx) * cell);
+    }
+    return probe;
+  };
+  const fitKey = `${clearance}|${cell}|${transform ? transform.elements.join(',') : ''}`;
+  let fitted = fittedInner.get(source)?.get(fitKey);
+  if (!fitted || fitted.inner.length !== nx * nz) {
+    // Without slack the inner offset ends exactly `clearance` beyond the scan outline; past that ring the conservative
+    // offset carries on, so the side walls of the body are not drawn as steep triangles through the scan.
+    const inner = offset(clearance, 0);
+    const innerRing = offset(clearance, cell * Math.SQRT2);
+    for (let k = 0; k < inner.length; k++) if (inner[k] === -Infinity) inner[k] = innerRing[k];
+    const nearest = scanDistance(scan, clearance + .05);
+    const finite = (k: number) => inner[k] !== -Infinity;
+    const samples = surfaceSamples((i, j) => finite(at(i, j)) && finite(at(i + 1, j)) && finite(at(i + 1, j + 1)) && finite(at(i, j + 1)));
+    let pending = samples;
+    const lift = new Float32Array(nx * nz);
+    for (let pass = 0; pass < 40 && pending.length; pass++) {
+      lift.fill(0);
+      for (const sample of pending) {
+        const distance = nearest(place(sample, inner), away);
+        if (distance >= clearance - 1e-4) continue;
+        // Moving up by dy changes the signed distance by about dy · (direction away from the scan).y. Only the nodes
+        // not above the point are lifted: on a steep side wall that tilts the surface away from the scan instead of
+        // sliding it along the wall.
+        const dy = (clearance - distance) / Math.max(.25, away.y) + 1e-3;
+        const y = probe.y;
+        for (let n = 0; n < sample.length; n += 2) if (inner[sample[n]] <= y + 1e-6 && dy > lift[sample[n]]) lift[sample[n]] = dy;
+      }
+      for (let k = 0; k < lift.length; k++) inner[k] += lift[k];
+      pending = pending.filter(sample => sample.some((k, n) => n % 2 === 0 && lift[k] > 0));
+    }
+    // Report on the fitted surface: true 3D distance to the scan triangles where it faces the scan.
+    let minimumGap = Infinity, coveredVertices = 0;
+    for (const sample of samples) {
+      const distance = nearest(place(sample, inner), away);
+      if (distance >= clearance + .05) continue;
+      coveredVertices++;
+      minimumGap = Math.min(minimumGap, distance);
+    }
+    fitted = { inner, minimumGap, coveredVertices };
+    if (!fittedInner.has(source)) fittedInner.set(source, new Map());
+    fittedInner.get(source)!.set(fitKey, fitted);
+  }
+  const inner = fitted.inner;
+  const { minimumGap, coveredVertices } = fitted;
 
   // 3. Occlusal plane y = p0 + p1·x + p2·z from local maxima (cusp tips), refit without low outliers.
   const peakReach = Math.round(2.5 / cell);
@@ -285,16 +361,6 @@ export function buildScanGuide(source: THREE.BufferGeometry, transform: THREE.Ma
   }
   if (!out.length) { scan.dispose(); return null; }
 
-  // Report: vertical gap between covered scan vertices and the inner surface of the body.
-  let minimumGap = Infinity, coveredVertices = 0;
-  for (let k = 0; k < position.count; k++) {
-    const x = position.getX(k), y = position.getY(k), z = position.getZ(k);
-    const i = Math.floor((x - x0) / cell), j = Math.floor((z - z0) / cell);
-    if (!inside(i, j)) continue;
-    const fx = (x - x0) / cell - i, fz = (z - z0) / cell - j;
-    const surface = bottom[at(i, j)] * (1 - fx) * (1 - fz) + bottom[at(i + 1, j)] * fx * (1 - fz) + bottom[at(i, j + 1)] * (1 - fx) * fz + bottom[at(i + 1, j + 1)] * fx * fz;
-    if (y > surface - 3 * wall) { coveredVertices++; minimumGap = Math.min(minimumGap, surface - y); }
-  }
   scan.dispose();
 
   const geometry = new THREE.BufferGeometry();
@@ -302,6 +368,77 @@ export function buildScanGuide(source: THREE.BufferGeometry, transform: THREE.Ma
   geometry.computeVertexNormals();
   geometry.computeBoundingBox();
   return { geometry, minimumGap, coveredVertices, cell, contacts: contacts.map((contact, n) => ({ ...contact, path: paths[n] })), slotsCut: slotContacts.length };
+}
+
+/**
+ * Signed distance to the nearest scan triangle (negative behind the scan surface, judged by the triangle's
+ * winding when the nearest point lies inside a face; on an edge or a vertex, including the open rim of the scan,
+ * it counts as outside), limited to `reach` (returns `reach` when nothing is closer). `away` receives the unit vector that
+ * points out of the scan surface from the nearest scan point.
+ */
+function scanDistance(scan: THREE.BufferGeometry, reach: number) {
+  const position = scan.getAttribute('position');
+  const index = scan.index;
+  const count = (index ? index.count : position.count) / 3;
+  const vertices = new Float32Array(count * 9);
+  for (let t = 0; t < count; t++) for (let n = 0; n < 3; n++) {
+    const v = index ? index.getX(3 * t + n) : 3 * t + n;
+    vertices[9 * t + 3 * n] = position.getX(v); vertices[9 * t + 3 * n + 1] = position.getY(v); vertices[9 * t + 3 * n + 2] = position.getZ(v);
+  }
+  const size = Math.max(.5, 2 * reach);
+  const buckets = new Map<number, number[]>();
+  const key = (i: number, j: number, k: number) => ((i + 1024) * 2048 + (j + 1024)) * 2048 + (k + 1024);
+  for (let t = 0; t < count; t++) {
+    const o = 9 * t;
+    const lo = [0, 1, 2].map(axis => Math.floor(Math.min(vertices[o + axis], vertices[o + 3 + axis], vertices[o + 6 + axis]) / size));
+    const hi = [0, 1, 2].map(axis => Math.floor(Math.max(vertices[o + axis], vertices[o + 3 + axis], vertices[o + 6 + axis]) / size));
+    for (let i = lo[0]; i <= hi[0]; i++) for (let j = lo[1]; j <= hi[1]; j++) for (let k = lo[2]; k <= hi[2]; k++) {
+      const bucket = buckets.get(key(i, j, k));
+      if (bucket) bucket.push(t); else buckets.set(key(i, j, k), [t]);
+    }
+  }
+  const seen = new Uint32Array(count);
+  let stamp = 0;
+  const triangle = new THREE.Triangle(), closest = new THREE.Vector3(), best = new THREE.Vector3(), normal = new THREE.Vector3(), weights = new THREE.Vector3();
+  let bestTriangle = -1;
+  return (point: THREE.Vector3, away: THREE.Vector3) => {
+    stamp++;
+    let distance = reach;
+    bestTriangle = -1;
+    away.set(0, 1, 0);
+    for (let k = Math.floor((point.z - reach) / size); k <= Math.floor((point.z + reach) / size); k++)
+      for (let j = Math.floor((point.y - reach) / size); j <= Math.floor((point.y + reach) / size); j++)
+      for (let i = Math.floor((point.x - reach) / size); i <= Math.floor((point.x + reach) / size); i++) {
+        const bucket = buckets.get(key(i, j, k));
+        if (!bucket) continue;
+        for (const t of bucket) {
+          if (seen[t] === stamp) continue;
+          seen[t] = stamp;
+          const o = 9 * t;
+          if (Math.min(vertices[o], vertices[o + 3], vertices[o + 6]) > point.x + distance || Math.max(vertices[o], vertices[o + 3], vertices[o + 6]) < point.x - distance) continue;
+          if (Math.min(vertices[o + 1], vertices[o + 4], vertices[o + 7]) > point.y + distance || Math.max(vertices[o + 1], vertices[o + 4], vertices[o + 7]) < point.y - distance) continue;
+          if (Math.min(vertices[o + 2], vertices[o + 5], vertices[o + 8]) > point.z + distance || Math.max(vertices[o + 2], vertices[o + 5], vertices[o + 8]) < point.z - distance) continue;
+          triangle.a.set(vertices[o], vertices[o + 1], vertices[o + 2]);
+          triangle.b.set(vertices[o + 3], vertices[o + 4], vertices[o + 5]);
+          triangle.c.set(vertices[o + 6], vertices[o + 7], vertices[o + 8]);
+          triangle.closestPointToPoint(point, closest);
+          const d = closest.distanceTo(point);
+          if (d < distance) { distance = d; best.copy(closest); bestTriangle = t; }
+        }
+      }
+    if (bestTriangle < 0) return distance;
+    const o = 9 * bestTriangle;
+    triangle.a.set(vertices[o], vertices[o + 1], vertices[o + 2]);
+    triangle.b.set(vertices[o + 3], vertices[o + 4], vertices[o + 5]);
+    triangle.c.set(vertices[o + 6], vertices[o + 7], vertices[o + 8]);
+    triangle.getNormal(normal);
+    if (distance < 1e-9) { away.copy(normal); return 0; }
+    away.subVectors(point, best).divideScalar(distance);
+    triangle.getBarycoord(best, weights);
+    if (away.dot(normal) >= 0 || Math.min(weights.x, weights.y, weights.z) < 1e-4) return distance;
+    away.negate();
+    return -distance;
+  };
 }
 
 function fitPlane(points: THREE.Vector3[]) {
