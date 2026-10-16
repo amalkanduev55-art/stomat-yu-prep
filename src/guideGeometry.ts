@@ -26,6 +26,16 @@ export function contactLayout(settings: GuideSettings, selected: number[], sides
   return [...new Map(selected.flatMap(id => contactSlots(settings, id, sides)).map(slot => [slot.key, slot])).values()].sort((first, second) => first.coordinate - second.coordinate);
 }
 
+export type GuideTemplate = 'A' | 'B';
+
+/**
+ * Two-template method: the contacts of the selected teeth alternate along the arch between template A and template B,
+ * so every slot of one template is solid wall in the other and the two together reach every contact.
+ */
+export function templateOfContact(index: number): GuideTemplate {
+  return index % 2 === 0 ? 'A' : 'B';
+}
+
 export function maximumSlotCount(settings: GuideSettings) {
   return Math.max(0, Math.min(6, Math.floor(4.55 / (settings.shaft + settings.clearance * 2 + .25))));
 }
