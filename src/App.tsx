@@ -177,7 +177,17 @@ export default function App() {
   };
   const upload = async (file: File | undefined, kind: 'original' | 'target') => {
     if (!file) return;
-    try { const buffer = await file.arrayBuffer(); const geometry = file.name.toLowerCase().endsWith('.ply') ? new PLYLoader().parse(buffer) : new STLLoader().parse(buffer); geometry.computeVertexNormals(); geometry.computeBoundingBox(); const size = new THREE.Vector3(); geometry.boundingBox!.getSize(size); if (size.length() === 0) throw new Error();  if (kind === 'original') { setImported(geometry); setOriginalTransform(null); setAlignmentReport(null); } else { setTargetImported(geometry); setLayers(current => ({ ...current, target: true })); } setBestFit(null); setFiles(current => ({ ...current, [kind]: file.name })); setValidated(false); cameraCommand('fit'); notify('Модель загружена без масштабирования и без принудительного смещения. Единицы проекта: мм; STL не содержит единиц измерения.'); } catch { notify('Не удалось прочитать STL / PLY'); }
+    try { const buffer = await file.arrayBuffer(); const geometry = file.name.toLowerCase().endsWith('.ply') ? new PLYLoader().parse(buffer) : new STLLoader().parse(buffer); geometry.computeVertexNormals(); geometry.computeBoundingBox(); const size = new THREE.Vector3(); geometry.boundingBox!.getSize(size); if (size.length() === 0) throw new Error();  if (kind === 'original') {
+        // Imported demo scans are commonly stored in XY; the workspace uses XZ for the dental arch.
+        // Rotate around the mesh's own bounding-box center so orientation changes without scaling or shifting its center.
+        const center = geometry.boundingBox!.getCenter(new THREE.Vector3());
+        const orientation = new THREE.Matrix4()
+          .makeTranslation(center.x, center.y, center.z)
+          .multiply(new THREE.Matrix4().makeRotationX(-Math.PI / 2))
+          .multiply(new THREE.Matrix4().makeTranslation(-center.x, -center.y, -center.z));
+        setImported(geometry); setOriginalTransform(orientation); setAlignmentReport(null);
+      } else { setTargetImported(geometry); setLayers(current => ({ ...current, target: true })); }
+      setBestFit(null); setFiles(current => ({ ...current, [kind]: file.name })); setValidated(false); cameraCommand('fit'); notify(kind === 'original' ? 'STL ориентирован из XY в XZ поворотом X −90°. Масштаб и центр модели сохранены; анатомическое совмещение выполняется отдельно.' : 'Target STL загружен без масштабирования и смещения. Единицы проекта: мм; STL не содержит единиц измерения.'); } catch { notify('Не удалось прочитать STL / PLY'); }
   };
   return <div className="app-shell cad-theme">
     <header className="topbar"><a className="brand" href="#" onClick={event => event.preventDefault()}><span className="brand-symbol">Y<span>U</span></span> YU-Prep <span className="beta">BETA</span></a><span className="top-divider" /><button className="project-picker" onClick={() => setModal('projects')}><FolderOpen size={16} /> {project} <ChevronDown size={14} /></button><span className="project-id">YU–024</span><div className="header-right"><span className="saved"><span /> Все изменения сохранены</span><button className="icon-button" onClick={save} title="Сохранить"><Save size={17} /></button><button className="icon-button" onClick={() => setModal('help')} title="Помощь"><CircleHelp size={18} /></button><span className="avatar">АК</span></div></header>
