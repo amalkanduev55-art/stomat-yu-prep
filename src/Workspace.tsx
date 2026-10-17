@@ -24,13 +24,13 @@ export const identityGuidePose: GuidePose = { x: 0, y: 0, z: 0, rx: 0, ry: 0, rz
 function Model(props: Props & { mode: DisplayMode; translucent: boolean }) {
   const bur = useRef<THREE.Group>(null);
   const firstIndex = Math.max(0, toothIds.indexOf(props.burTooth ?? props.selected[0] ?? 31));
-  const fragment = props.mode === 'fragment';
+  const fragmentMode = props.mode === 'fragment';
   const lifted = props.mode === 'detached' ? 12 : 0;
   const pose = props.guidePose ?? identityGuidePose;
   const thickness = Math.min(1.2, Math.max(.25, props.settings.wall * .4));
   const slots = contactSlots(props.settings, props.burTooth ?? toothIds[firstIndex], props.slotSides);
   const coordinate = slots[props.activeSlot]?.coordinate ?? firstIndex;
-  const guideGeometry = useMemo(() => unifiedGuideGeometry(props.settings, props.guide, props.selected, fragment ? firstIndex : undefined, props.slotCounts, props.slotSides), [props.settings.shaft, props.settings.clearance, props.settings.wall, props.guide, props.selected, fragment, firstIndex, props.slotCounts, props.slotSides]);
+  const guideGeometry = useMemo(() => unifiedGuideGeometry(props.settings, props.guide, props.selected, fragmentMode ? firstIndex : undefined, props.slotCounts, props.slotSides), [props.settings.shaft, props.settings.clearance, props.settings.wall, props.guide, props.selected, fragmentMode, firstIndex, props.slotCounts, props.slotSides]);
   useEffect(() => () => guideGeometry.dispose(), [guideGeometry]);
   // With an imported scan the guide body is built on the scan itself (seat offset + undercut block-out).
   // Body over the prepared teeth plus one unprepared support tooth on each side; whole arch with nothing selected.
@@ -66,6 +66,24 @@ function Model(props: Props & { mode: DisplayMode; translucent: boolean }) {
     const end = start.clone().addScaledVector(insertionAxis.direction, 14);
     return { start, end, quaternion: new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), insertionAxis.direction) };
   }, [insertionAxis, scanGuide]);
+  // Tooth fragment on a scan: the scan, guide and bur around the active contact, moved so that the contact is at the
+  // origin, the arch runs along X and the cheek side faces +Z (where the fragment camera looks from), and cropped.
+  const scanFrame = useMemo(() => {
+    const contact = fragmentMode && scanGuide ? scanGuide.contacts.find(item => Math.abs(item.coordinate - coordinate) < .01) : undefined;
+    if (!contact || !scanGuide) return null;
+    const centre = scanGuide.contacts.reduce((sum, item) => sum.add(item.point), new THREE.Vector3()).divideScalar(scanGuide.contacts.length);
+    const up = new THREE.Vector3(0, 1, 0);
+    const outward = contact.normal.clone().setY(0).normalize();
+    if (outward.dot(contact.point.clone().sub(centre)) < 0) outward.negate();
+    const along = new THREE.Vector3().crossVectors(up, outward);
+    const place = new THREE.Matrix4().makeBasis(along, up, outward).setPosition(contact.point.clone().addScaledVector(up, -3));
+    return place.invert();
+  }, [fragmentMode, scanGuide, coordinate]);
+  const fragment = fragmentMode && !scanFrame;
+  const cropBox = useMemo(() => scanFrame ? new THREE.Box3(new THREE.Vector3(-6.5, -14, -9), new THREE.Vector3(6.5, 60, 9)) : null, [scanFrame]);
+  const crop = useMemo(() => scanFrame ? [new THREE.Plane(new THREE.Vector3(1, 0, 0), 6.5), new THREE.Plane(new THREE.Vector3(-1, 0, 0), 6.5), new THREE.Plane(new THREE.Vector3(0, 0, 1), 9), new THREE.Plane(new THREE.Vector3(0, 0, -1), 9), new THREE.Plane(new THREE.Vector3(0, 1, 0), 14)] : null, [scanFrame]);
+  const renderer = useThree(state => state.gl);
+  useEffect(() => { renderer.localClippingEnabled = true; }, [renderer]);
   // On a scan the bur runs along the stopper path next to the active contact found on the scan.
   const scanContact = scanGuide && !fragment ? scanGuide.contacts.find(contact => Math.abs(contact.coordinate - coordinate) < .01) ?? null : null;
   // Collision control on a scan: the bur moved along every slot's stopper path against the neighbouring teeth and gum.
@@ -142,22 +160,22 @@ function Model(props: Props & { mode: DisplayMode; translucent: boolean }) {
       return point;
     }) };
   }), [props.settings.shaft, props.settings.clearance, props.selected, props.slotSides, thickness, fragment, firstIndex, scanGuide]);
-  return <group name="cad-model">
+  return <group name="cad-model" matrixAutoUpdate={false} matrix={scanFrame ?? identityMatrix} userData={{ crop: cropBox }}>
     {showTeeth && props.layers.roots && !props.imported && toothIds.map((id, index) => fragment && index !== firstIndex ? null : <group key={`roots-${id}`} name={`demo-roots-${id}`} position={fragment ? [0, 0, 0] : toothPosition(index)} rotation={[0, fragment ? 0 : (index - 6.5) * .215, 0]}>{roots[index].map((geometry, rootIndex) => <group key={rootIndex}><mesh geometry={geometry}><meshStandardMaterial color="#d6c6a5" roughness={.72} transparent={props.layerOpacities.roots < 100} opacity={props.layerOpacities.roots / 100} depthWrite={props.layerOpacities.roots === 100} /></mesh>{props.wireframe && <mesh geometry={geometry}><meshBasicMaterial color="#7d7057" wireframe transparent opacity={.12} /></mesh>}</group>)}</group>)}
     {showTeeth && props.layers.gum && !props.imported && !fragment && <group><mesh geometry={gingiva}><meshPhysicalMaterial vertexColors roughness={.5} clearcoat={.16} clearcoatRoughness={.45} side={THREE.DoubleSide} transparent={props.layerOpacities.gum < 100} opacity={props.layerOpacities.gum / 100} /></mesh>{props.wireframe && <mesh geometry={gingiva}><meshBasicMaterial color="#934e60" wireframe transparent opacity={.08} /></mesh>}</group>}
-    {showTeeth && props.layers.original && (props.imported && !fragment ? <group><mesh geometry={heat ?? props.imported} matrixAutoUpdate={false} matrix={props.originalTransform ?? new THREE.Matrix4()} onClick={event => { if (!props.pickingGum) return; event.stopPropagation(); props.onPickGum([event.point.x, event.point.y, event.point.z]); }}><meshStandardMaterial key={heat ? 'heat' : 'plain'} color={heat ? '#ffffff' : props.originalColor} vertexColors={Boolean(heat)} roughness={.65} side={THREE.DoubleSide} transparent={props.sourceOpacity < 100} opacity={props.sourceOpacity / 100} /></mesh>{props.wireframe && <mesh geometry={props.imported} matrixAutoUpdate={false} matrix={props.originalTransform ?? new THREE.Matrix4()}><meshBasicMaterial color="#7a8f9d" wireframe transparent opacity={.18} /></mesh>}</group> : toothIds.map((id, index) => fragment && index !== firstIndex ? null : <group key={id} position={fragment ? [0, 0, 0] : toothPosition(index)} rotation={[0, fragment ? 0 : (index - 6.5) * .215, 0]}>
+    {showTeeth && props.layers.original && (props.imported && !fragment ? <group><mesh geometry={heat ?? props.imported} matrixAutoUpdate={false} matrix={props.originalTransform ?? new THREE.Matrix4()} onClick={event => { if (!props.pickingGum) return; event.stopPropagation(); props.onPickGum([event.point.x, event.point.y, event.point.z]); }}><meshStandardMaterial key={heat ? 'heat' : 'plain'} clippingPlanes={crop} color={heat ? '#ffffff' : props.originalColor} vertexColors={Boolean(heat)} roughness={.65} side={THREE.DoubleSide} transparent={props.sourceOpacity < 100} opacity={props.sourceOpacity / 100} /></mesh>{props.wireframe && <mesh geometry={props.imported} matrixAutoUpdate={false} matrix={props.originalTransform ?? new THREE.Matrix4()}><meshBasicMaterial color="#7a8f9d" wireframe transparent opacity={.18} /></mesh>}</group> : toothIds.map((id, index) => fragment && index !== firstIndex ? null : <group key={id} position={fragment ? [0, 0, 0] : toothPosition(index)} rotation={[0, fragment ? 0 : (index - 6.5) * .215, 0]}>
       {fragment && props.layers.gum && <mesh position={[0, -2.4, 0]} scale={[2.8, 2.3, 3]}><sphereGeometry args={[1, 32, 24]} /><meshPhysicalMaterial color="#d28b8c" roughness={.5} clearcoat={.16} /></mesh>}
       <mesh geometry={crowns[index]} onClick={event => { event.stopPropagation(); if (!props.layerLocks.original) props.onSelect(id); }}><meshPhysicalMaterial vertexColors color="#ffffff" roughness={.4} metalness={0} clearcoat={.2} clearcoatRoughness={.3} transparent={props.sourceOpacity < 100} opacity={props.sourceOpacity / 100} /></mesh>
       {props.wireframe && <mesh geometry={crowns[index]}><meshBasicMaterial color="#82939b" wireframe transparent opacity={.12} /></mesh>}
       {layout.supports.includes(index) && props.layers.supports && <Html center position={[0, -4.7, 0]}><span className="support-tooth-label">{id} · опора</span></Html>}
     </group>))}
-    {showTeeth && !fragment && props.layers.target && props.targetImported && <mesh geometry={props.targetImported} matrixAutoUpdate={false} matrix={props.targetTransform ?? new THREE.Matrix4()}><meshStandardMaterial color={props.targetColor} transparent opacity={props.opacity / 100} side={THREE.DoubleSide} depthWrite={false} /></mesh>}
+    {showTeeth && !fragmentMode && props.layers.target && props.targetImported && <mesh geometry={props.targetImported} matrixAutoUpdate={false} matrix={props.targetTransform ?? new THREE.Matrix4()}><meshStandardMaterial color={props.targetColor} transparent opacity={props.opacity / 100} side={THREE.DoubleSide} depthWrite={false} /></mesh>}
     {showTeeth && !props.imported && props.layers.supports && !fragment && layout.supports.map(index => <mesh key={`support-${index}`} geometry={crowns[index]} position={toothPosition(index)} rotation={[0, (index - 6.5) * .215, 0]} scale={1.013}><meshStandardMaterial color="#6e9cba" transparent opacity={props.layerOpacities.supports / 100} depthWrite={false} /></mesh>)}
-    {props.imported && !fragment && props.gumPoints.map(([x, y, z], index) => <mesh key={`gum-${index}`} position={[x, y, z]} raycast={() => null}><sphereGeometry args={[.35, 16, 12]} /><meshBasicMaterial color="#e2557a" depthTest={false} /></mesh>)}
-    {props.mode !== 'detached' && collisionGeometry.map(item => <points key={item.key} name={`collision-${item.key}`} geometry={item.geometry} raycast={() => null} renderOrder={5}><pointsMaterial color={item.color} size={.45} sizeAttenuation depthTest={false} transparent /></points>)}
-    {axisArrow && !fragment && <group name="insertion-axis"><Line points={[axisArrow.start, axisArrow.end]} color="#2a7fd4" lineWidth={3} /><mesh position={axisArrow.end} quaternion={axisArrow.quaternion} raycast={() => null}><coneGeometry args={[.7, 2, 20]} /><meshBasicMaterial color="#2a7fd4" /></mesh></group>}
+    {props.imported && !fragmentMode && props.gumPoints.map(([x, y, z], index) => <mesh key={`gum-${index}`} position={[x, y, z]} raycast={() => null}><sphereGeometry args={[.35, 16, 12]} /><meshBasicMaterial color="#e2557a" depthTest={false} /></mesh>)}
+    {props.mode !== 'detached' && collisionGeometry.map(item => <points key={item.key} name={`collision-${item.key}`} geometry={item.geometry} raycast={() => null} renderOrder={5}><pointsMaterial color={item.color} clippingPlanes={crop} size={.45} sizeAttenuation depthTest={false} transparent /></points>)}
+    {axisArrow && !fragmentMode && <group name="insertion-axis"><Line points={[axisArrow.start, axisArrow.end]} color="#2a7fd4" lineWidth={3} /><mesh position={axisArrow.end} quaternion={axisArrow.quaternion} raycast={() => null}><coneGeometry args={[.7, 2, 20]} /><meshBasicMaterial color="#2a7fd4" /></mesh></group>}
     <group ref={props.guideRef} name="guide-frame" visible={showGuide} position={[pose.x + (insertionAxis?.direction.x ?? 0) * lifted, pose.y + (insertionAxis?.direction.y ?? 1) * lifted, pose.z + (insertionAxis?.direction.z ?? 0) * lifted]} rotation={[pose.rx, pose.ry, pose.rz]}>
-      {scanGuide && !fragment ? <><mesh name={`template-${props.template === 'B' ? 'B' : 'A'}`} geometry={scanGuide.geometry} raycast={props.pickingGum ? () => null : THREE.Mesh.prototype.raycast}><meshPhysicalMaterial color={props.template === 'B' ? '#5aa9d6' : '#edc832'} roughness={.28} metalness={0} clearcoat={.3} transparent={props.guideOpacity < 100} opacity={props.guideOpacity / 100} side={THREE.DoubleSide} depthWrite={props.guideOpacity === 100} /></mesh>{scanGuideB && <mesh name="template-B" geometry={scanGuideB.geometry} position={[0, 14, 0]} raycast={() => null}><meshPhysicalMaterial color="#5aa9d6" roughness={.28} metalness={0} clearcoat={.3} transparent={props.guideOpacity < 100} opacity={props.guideOpacity / 100} side={THREE.DoubleSide} depthWrite={props.guideOpacity === 100} /></mesh>}</> : layout.working.length > 0 && <mesh geometry={guideGeometry}><meshPhysicalMaterial color="#edc832" roughness={.28} metalness={0} clearcoat={.3} transparent={props.guideOpacity < 100} opacity={props.guideOpacity / 100} side={THREE.DoubleSide} depthWrite={props.guideOpacity === 100} /></mesh>}
+      {scanGuide && !fragment ? <><mesh name={`template-${props.template === 'B' ? 'B' : 'A'}`} geometry={scanGuide.geometry} raycast={props.pickingGum ? () => null : THREE.Mesh.prototype.raycast}><meshPhysicalMaterial clippingPlanes={crop} color={props.template === 'B' ? '#5aa9d6' : '#edc832'} roughness={.28} metalness={0} clearcoat={.3} transparent={props.guideOpacity < 100} opacity={props.guideOpacity / 100} side={THREE.DoubleSide} depthWrite={props.guideOpacity === 100} /></mesh>{scanGuideB && <mesh name="template-B" geometry={scanGuideB.geometry} position={[0, 14, 0]} raycast={() => null}><meshPhysicalMaterial clippingPlanes={crop} color="#5aa9d6" roughness={.28} metalness={0} clearcoat={.3} transparent={props.guideOpacity < 100} opacity={props.guideOpacity / 100} side={THREE.DoubleSide} depthWrite={props.guideOpacity === 100} /></mesh>}</> : layout.working.length > 0 && <mesh geometry={guideGeometry}><meshPhysicalMaterial color="#edc832" roughness={.28} metalness={0} clearcoat={.3} transparent={props.guideOpacity < 100} opacity={props.guideOpacity / 100} side={THREE.DoubleSide} depthWrite={props.guideOpacity === 100} /></mesh>}
 
         {showBur && <group ref={bur}>
         {props.settings.totalLength > props.settings.length && <mesh position={[0, (props.settings.totalLength - props.settings.length) / 2, 0]}><cylinderGeometry args={[props.settings.shaft / 2, props.settings.shaft / 2, props.settings.totalLength - props.settings.length, 32]} /><meshStandardMaterial color="#b9c3ca" metalness={.85} roughness={.22} transparent={props.layerOpacities.bur < 100} opacity={props.layerOpacities.bur / 100} /></mesh>}
@@ -165,20 +183,21 @@ function Model(props: Props & { mode: DisplayMode; translucent: boolean }) {
         {props.settings.stopperEnabled === 1 && stopper && <mesh position={[0, -props.settings.stopperPosition, 0]} geometry={stopper}><meshStandardMaterial color="#aab5bf" metalness={.9} roughness={.25} side={THREE.DoubleSide} transparent={props.layerOpacities.bur < 100} opacity={props.layerOpacities.bur / 100} /></mesh>}
         </group>}
       {props.layers.channels && channels.map(channel => <Line key={channel.key} points={channel.points} color="#8fadb8" transparent opacity={props.layerOpacities.channels / 100} lineWidth={2} />)}
-      {slots.length > 0 && props.selected.length > 0 && props.layers.trajectory && <Line points={localPath} color="#26a9b5" lineWidth={fragment ? 3 : 2} transparent opacity={props.layerOpacities.trajectory / 100} dashed dashSize={.25} gapSize={.15} />}
-      {fragment && showGuide && slots.length > 0 && props.selected.length > 0 && <group>
+      {slots.length > 0 && props.selected.length > 0 && props.layers.trajectory && <Line points={localPath} color="#26a9b5" lineWidth={fragmentMode ? 3 : 2} transparent opacity={props.layerOpacities.trajectory / 100} dashed dashSize={.25} gapSize={.15} />}
+      {fragmentMode && showGuide && slots.length > 0 && props.selected.length > 0 && <group>
         {[12, 32, 52].map(step => {
           const tangent = localPath[step + 1].clone().sub(localPath[step - 1]).normalize();
           return <mesh key={`direction-${step}`} position={localPath[step]} quaternion={new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent)}><coneGeometry args={[.23, .65, 16]} /><meshBasicMaterial color="#287f91" /></mesh>;
         })}
         {[0, 32, 64].map((step, index) => <group key={step} position={localPath[step]}><mesh><sphereGeometry args={[.13, 12, 12]} /><meshBasicMaterial color="#287f91" /></mesh><Html center position={[index === 1 ? 3.6 : 4, index === 1 ? 1.7 : .4, 0]}><span className="channel-label">{['① Передний вход', '② Через верх', '③ Задний выход'][index]}</span></Html><Line points={[[0, 0, 0], [index === 1 ? 3.3 : 3.7, index === 1 ? 1.7 : .4, 0]]} color="#287f91" lineWidth={1} /></group>)}
-        <Html center position={[-3.8, .6, 0]}><span className="channel-label base-label">Цельная нижняя часть</span></Html>
+        {!scanFrame && <Html center position={[-3.8, .6, 0]}><span className="channel-label base-label">Цельная нижняя часть</span></Html>}
       </group>}
     </group>
 
 
   </group>;
 }
+const identityMatrix = new THREE.Matrix4();
 function CameraControl({ view, mode, tool, command }: { view: string; mode: DisplayMode; tool: CadTool; command: CameraAction }) {
   const controls = useRef<any>(null);
   const scene = useThree(state => state.scene);
@@ -213,6 +232,9 @@ function CameraControl({ view, mode, tool, command }: { view: string; mode: Disp
         if (!object.geometry.boundingBox) object.geometry.computeBoundingBox();
         if (object.geometry.boundingBox) bounds.union(object.geometry.boundingBox.clone().applyMatrix4(object.matrixWorld));
       });
+      // The scan tooth fragment shows only a cropped part of the scan and guide.
+      const crop = scene.getObjectByName('cad-model')?.userData.crop as THREE.Box3 | null | undefined;
+      if (crop) bounds.intersect(crop);
       if (!bounds.isEmpty()) {
         const center = bounds.getCenter(new THREE.Vector3());
         const size = bounds.getSize(new THREE.Vector3());

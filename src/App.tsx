@@ -220,7 +220,9 @@ export default function App() {
     const bodies = frame.children.filter((child): child is THREE.Mesh => child instanceof THREE.Mesh && child.type === 'Mesh');
     // On a scan each template of the two-template method is its own mesh and file; template B may be shown raised in the AB preview.
     const templates = bodies.filter(body => body.name.startsWith('template-'));
-    const files = templates.length ? templates.map(body => ({ body, matrix: frame.matrixWorld, name: `YU-024_Template_${body.name.slice(-1)}.stl` })) : bodies.length === 1 ? [{ body: bodies[0], matrix: bodies[0].matrixWorld, name: 'YU-024_Contacts_prototype.stl' }] : [];
+    // Relative to the model root, so a moved view (the scan tooth fragment) does not move the exported guide.
+    const placed = frame.parent ? frame.parent.matrixWorld.clone().invert().multiply(frame.matrixWorld) : frame.matrixWorld;
+    const files = templates.length ? templates.map(body => ({ body, matrix: placed, name: `YU-024_Template_${body.name.slice(-1)}.stl` })) : bodies.length === 1 ? [{ body: bodies[0], matrix: bodies[0].matrixWorld, name: 'YU-024_Contacts_prototype.stl' }] : [];
     if (!files.length || files.some(file => !file.body.geometry)) { notify('Корпус направляющего не найден'); return; }
     files.forEach(({ body, matrix, name }) => {
       const geometry = body.geometry.clone();
