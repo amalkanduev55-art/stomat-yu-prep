@@ -8,13 +8,14 @@ import gingivaGeometry from './gingivaGeometry';
 import rootGeometry from './rootGeometry';
 import ErrorBoundary from './ErrorBoundary';
 import { buildScanGuide } from './scanGuideGeometry';
+import { buildAlongAxis, findInsertionAxis, type InsertionAxis } from './insertionAxis';
 import type { LayerLocks, LayerValues, LayerVisibility } from './cadLayers';
 
 export type CameraAction = { id: number; action: 'fit' | 'reset' | 'zoom-in' | 'zoom-out' };
 export type CadTool = 'rotate' | 'pan' | 'zoom';
 
 export type Settings = { diameter: number; length: number; shaft: number; totalLength: number; stopper: number; stopperInner: number; stopperShape: number; stopperEnabled: number; stopperHeight: number; stopperPosition: number; clearance: number; wall: number; angle: number; profile: number; seatOffset: number; gumOffset: number };
-type Props = { selected: number[]; onSelect: (id: number) => void; burTooth: number | null; slotCounts: SlotCounts; slotSides: SlotSides; activeSlot: number; mode: DisplayMode; translucent: boolean; sourceOpacity: number; guideOpacity: number; wireframe: boolean; settings: Settings; guide: number; layers: LayerVisibility; layerOpacities: LayerValues; layerLocks: LayerLocks; tool: CadTool; cameraAction: CameraAction; sectionEnabled: boolean; sectionOffset: number; heatmap: boolean; heatmapGeometry: THREE.BufferGeometry | null; collision: boolean; playing: boolean; progress: number; view: string; onViewChange: (view: string) => void; guideRef: React.RefObject<THREE.Group | null>; imported: THREE.BufferGeometry | null; originalTransform: THREE.Matrix4 | null; targetImported: THREE.BufferGeometry | null; targetTransform: THREE.Matrix4 | null; opacity: number; originalColor: string; targetColor: string; guidePose?: GuidePose; gumPoints: Array<[number, number, number]>; pickingGum: boolean; onPickGum: (point: [number, number, number]) => void; template: GuideTemplate | 'both' };
+type Props = { selected: number[]; onSelect: (id: number) => void; burTooth: number | null; slotCounts: SlotCounts; slotSides: SlotSides; activeSlot: number; mode: DisplayMode; translucent: boolean; sourceOpacity: number; guideOpacity: number; wireframe: boolean; settings: Settings; guide: number; layers: LayerVisibility; layerOpacities: LayerValues; layerLocks: LayerLocks; tool: CadTool; cameraAction: CameraAction; sectionEnabled: boolean; sectionOffset: number; heatmap: boolean; heatmapGeometry: THREE.BufferGeometry | null; collision: boolean; playing: boolean; progress: number; view: string; onViewChange: (view: string) => void; guideRef: React.RefObject<THREE.Group | null>; imported: THREE.BufferGeometry | null; originalTransform: THREE.Matrix4 | null; targetImported: THREE.BufferGeometry | null; targetTransform: THREE.Matrix4 | null; opacity: number; originalColor: string; targetColor: string; guidePose?: GuidePose; gumPoints: Array<[number, number, number]>; pickingGum: boolean; onPickGum: (point: [number, number, number]) => void; template: GuideTemplate | 'both'; optimalAxis: boolean; onInsertionAxis: (axis: InsertionAxis | null) => void };
 export type DisplayMode = 'installed' | 'detached' | 'guide' | 'fragment' | 'teeth';
 export type GuidePose = { x: number; y: number; z: number; rx: number; ry: number; rz: number };
 export const identityGuidePose: GuidePose = { x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0 };
@@ -41,9 +42,29 @@ function Model(props: Props & { mode: DisplayMode; translucent: boolean }) {
   }, [props.settings.shaft, props.settings.clearance, props.selected, props.slotSides]);
   // Removal heatmap: the Original scan coloured by depth to Target, shown instead of the plain scan.
   const heat = props.heatmap && props.heatmapGeometry ? props.heatmapGeometry : null;
-  const buildTemplate = (slots: number[]) => buildScanGuide(props.imported!, props.originalTransform, { clearance: props.settings.seatOffset, wall: props.settings.wall, gumOffset: props.settings.gumOffset, gumPoints: props.gumPoints, span: scanSpan, slots, slotWidth: props.settings.shaft + props.settings.clearance * 2 });
-  const scanGuide = useMemo(() => props.imported ? buildTemplate(scanSlots[props.template === 'B' ? 'B' : 'A']) : null, [props.imported, props.originalTransform, props.settings.seatOffset, props.settings.wall, props.settings.gumOffset, props.gumPoints, props.settings.shaft, props.settings.clearance, scanSlots, scanSpan, props.template === 'B']);
-  const scanGuideB = useMemo(() => props.imported && props.template === 'both' ? buildTemplate(scanSlots.B) : null, [props.imported, props.originalTransform, props.settings.seatOffset, props.settings.wall, props.settings.gumOffset, props.gumPoints, props.settings.shaft, props.settings.clearance, scanSlots, scanSpan, props.template === 'both']);
+  const buildOn = (slots: number[], transform: THREE.Matrix4 | null) => buildScanGuide(props.imported!, transform, { clearance: props.settings.seatOffset, wall: props.settings.wall, gumOffset: props.settings.gumOffset, gumPoints: props.gumPoints, span: scanSpan, slots, slotWidth: props.settings.shaft + props.settings.clearance * 2 });
+  // Optimal insertion axis: least undercut under the footprint of the vertical guide (without slots).
+  const insertionAxis = useMemo(() => {
+    if (!props.imported || !props.optimalAxis) return null;
+    const vertical = buildOn([], props.originalTransform);
+    if (!vertical) return null;
+    const axis = findInsertionAxis(props.imported, props.originalTransform, vertical.geometry);
+    vertical.geometry.dispose();
+    return axis;
+  }, [props.imported, props.originalTransform, props.settings.seatOffset, props.settings.wall, props.settings.gumOffset, props.gumPoints, scanSpan, props.optimalAxis]);
+  useEffect(() => { props.onInsertionAxis(insertionAxis); }, [insertionAxis]);
+  const buildTemplate = (slots: number[]) => insertionAxis && insertionAxis.tilt > 0 ? buildAlongAxis(insertionAxis.direction, props.originalTransform, transform => buildOn(slots, transform)) : buildOn(slots, props.originalTransform);
+  const scanGuide = useMemo(() => props.imported ? buildTemplate(scanSlots[props.template === 'B' ? 'B' : 'A']) : null, [props.imported, props.originalTransform, props.settings.seatOffset, props.settings.wall, props.settings.gumOffset, props.gumPoints, props.settings.shaft, props.settings.clearance, scanSlots, scanSpan, props.template === 'B', insertionAxis]);
+  const scanGuideB = useMemo(() => props.imported && props.template === 'both' ? buildTemplate(scanSlots.B) : null, [props.imported, props.originalTransform, props.settings.seatOffset, props.settings.wall, props.settings.gumOffset, props.gumPoints, props.settings.shaft, props.settings.clearance, scanSlots, scanSpan, props.template === 'both', insertionAxis]);
+  // Arrow of the insertion axis over the middle of the guide.
+  const axisArrow = useMemo(() => {
+    if (!insertionAxis || !scanGuide) return null;
+    scanGuide.geometry.computeBoundingBox();
+    const box = scanGuide.geometry.boundingBox!;
+    const start = box.getCenter(new THREE.Vector3()).setY(box.max.y + 2);
+    const end = start.clone().addScaledVector(insertionAxis.direction, 14);
+    return { start, end, quaternion: new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), insertionAxis.direction) };
+  }, [insertionAxis, scanGuide]);
   // On a scan the bur runs along the stopper path next to the active contact found on the scan.
   const scanContact = scanGuide && !fragment ? scanGuide.contacts.find(contact => Math.abs(contact.coordinate - coordinate) < .01) ?? null : null;
   useEffect(() => () => scanGuide?.geometry.dispose(), [scanGuide]);
@@ -117,7 +138,8 @@ function Model(props: Props & { mode: DisplayMode; translucent: boolean }) {
     {showTeeth && !fragment && props.layers.target && props.targetImported && <mesh geometry={props.targetImported} matrixAutoUpdate={false} matrix={props.targetTransform ?? new THREE.Matrix4()}><meshStandardMaterial color={props.targetColor} transparent opacity={props.opacity / 100} side={THREE.DoubleSide} depthWrite={false} /></mesh>}
     {showTeeth && !props.imported && props.layers.supports && !fragment && layout.supports.map(index => <mesh key={`support-${index}`} geometry={crowns[index]} position={toothPosition(index)} rotation={[0, (index - 6.5) * .215, 0]} scale={1.013}><meshStandardMaterial color="#6e9cba" transparent opacity={props.layerOpacities.supports / 100} depthWrite={false} /></mesh>)}
     {props.imported && !fragment && props.gumPoints.map(([x, y, z], index) => <mesh key={`gum-${index}`} position={[x, y, z]} raycast={() => null}><sphereGeometry args={[.35, 16, 12]} /><meshBasicMaterial color="#e2557a" depthTest={false} /></mesh>)}
-    <group ref={props.guideRef} name="guide-frame" visible={showGuide} position={[pose.x, lifted + pose.y, pose.z]} rotation={[pose.rx, pose.ry, pose.rz]}>
+    {axisArrow && !fragment && <group name="insertion-axis"><Line points={[axisArrow.start, axisArrow.end]} color="#2a7fd4" lineWidth={3} /><mesh position={axisArrow.end} quaternion={axisArrow.quaternion} raycast={() => null}><coneGeometry args={[.7, 2, 20]} /><meshBasicMaterial color="#2a7fd4" /></mesh></group>}
+    <group ref={props.guideRef} name="guide-frame" visible={showGuide} position={[pose.x + (insertionAxis?.direction.x ?? 0) * lifted, pose.y + (insertionAxis?.direction.y ?? 1) * lifted, pose.z + (insertionAxis?.direction.z ?? 0) * lifted]} rotation={[pose.rx, pose.ry, pose.rz]}>
       {scanGuide && !fragment ? <><mesh name={`template-${props.template === 'B' ? 'B' : 'A'}`} geometry={scanGuide.geometry} raycast={props.pickingGum ? () => null : THREE.Mesh.prototype.raycast}><meshPhysicalMaterial color={props.template === 'B' ? '#5aa9d6' : '#edc832'} roughness={.28} metalness={0} clearcoat={.3} transparent={props.guideOpacity < 100} opacity={props.guideOpacity / 100} side={THREE.DoubleSide} depthWrite={props.guideOpacity === 100} /></mesh>{scanGuideB && <mesh name="template-B" geometry={scanGuideB.geometry} position={[0, 14, 0]} raycast={() => null}><meshPhysicalMaterial color="#5aa9d6" roughness={.28} metalness={0} clearcoat={.3} transparent={props.guideOpacity < 100} opacity={props.guideOpacity / 100} side={THREE.DoubleSide} depthWrite={props.guideOpacity === 100} /></mesh>}</> : layout.working.length > 0 && <mesh geometry={guideGeometry}><meshPhysicalMaterial color="#edc832" roughness={.28} metalness={0} clearcoat={.3} transparent={props.guideOpacity < 100} opacity={props.guideOpacity / 100} side={THREE.DoubleSide} depthWrite={props.guideOpacity === 100} /></mesh>}
 
         {showBur && <group ref={bur}>
