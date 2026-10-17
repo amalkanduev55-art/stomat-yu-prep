@@ -22,10 +22,12 @@ function worldPoints(geometry: THREE.BufferGeometry, matrix: THREE.Matrix4 | nul
   return points;
 }
 
-/** Exact nearest vertex of the reference model through a uniform grid. */
+/** Exact nearest vertex of the reference model through a uniform grid (numeric cell keys, flat coordinates). */
 function nearestIndex(points: THREE.Vector3[], size = 1) {
-  const cells = new Map<string, number[]>();
-  const key = (i: number, j: number, k: number) => `${i},${j},${k}`;
+  const xyz = new Float64Array(points.length * 3);
+  points.forEach((point, index) => xyz.set([point.x, point.y, point.z], index * 3));
+  const cells = new Map<number, number[]>();
+  const key = (i: number, j: number, k: number) => ((i + 1024) * 2048 + (j + 1024)) * 2048 + (k + 1024);
   points.forEach((point, index) => {
     const id = key(Math.floor(point.x / size), Math.floor(point.y / size), Math.floor(point.z / size));
     const cell = cells.get(id);
@@ -33,17 +35,22 @@ function nearestIndex(points: THREE.Vector3[], size = 1) {
   });
   return (query: THREE.Vector3, maxRing = 12) => {
     const ci = Math.floor(query.x / size), cj = Math.floor(query.y / size), ck = Math.floor(query.z / size);
+    const qx = query.x, qy = query.y, qz = query.z;
     let best = -1, bestDistance = Infinity;
     for (let ring = 0; ring <= maxRing; ring++) {
       // Every point outside the visited rings is at least (ring) cells away.
       if (best >= 0 && bestDistance <= (ring - 1) * (ring - 1) * size * size) break;
-      for (let i = ci - ring; i <= ci + ring; i++) for (let j = cj - ring; j <= cj + ring; j++) for (let k = ck - ring; k <= ck + ring; k++) {
-        if (Math.max(Math.abs(i - ci), Math.abs(j - cj), Math.abs(k - ck)) !== ring) continue;
-        const cell = cells.get(key(i, j, k));
-        if (!cell) continue;
-        for (const index of cell) {
-          const distance = query.distanceToSquared(points[index]);
-          if (distance < bestDistance) { bestDistance = distance; best = index; }
+      for (let i = ci - ring; i <= ci + ring; i++) for (let j = cj - ring; j <= cj + ring; j++) {
+        // Only the shell of the cube: all k on its two faces in i or j, else just the two end cells.
+        const face = Math.abs(i - ci) === ring || Math.abs(j - cj) === ring;
+        for (let k = ck - ring; k <= ck + ring; k += face || ring === 0 ? 1 : 2 * ring) {
+          const cell = cells.get(key(i, j, k));
+          if (!cell) continue;
+          for (const index of cell) {
+            const dx = xyz[index * 3] - qx, dy = xyz[index * 3 + 1] - qy, dz = xyz[index * 3 + 2] - qz;
+            const distance = dx * dx + dy * dy + dz * dz;
+            if (distance < bestDistance) { bestDistance = distance; best = index; }
+          }
         }
       }
     }
