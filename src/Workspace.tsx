@@ -9,13 +9,14 @@ import rootGeometry from './rootGeometry';
 import ErrorBoundary from './ErrorBoundary';
 import { buildScanGuide } from './scanGuideGeometry';
 import { buildAlongAxis, findInsertionAxis, type InsertionAxis } from './insertionAxis';
+import { findBurCollisions, gumLineNear, scanPathPoint, scanPathTangent, type BurCollisions } from './burCollision';
 import type { LayerLocks, LayerValues, LayerVisibility } from './cadLayers';
 
 export type CameraAction = { id: number; action: 'fit' | 'reset' | 'zoom-in' | 'zoom-out' };
 export type CadTool = 'rotate' | 'pan' | 'zoom';
 
 export type Settings = { diameter: number; length: number; shaft: number; totalLength: number; stopper: number; stopperInner: number; stopperShape: number; stopperEnabled: number; stopperHeight: number; stopperPosition: number; clearance: number; wall: number; angle: number; profile: number; seatOffset: number; gumOffset: number };
-type Props = { selected: number[]; onSelect: (id: number) => void; burTooth: number | null; slotCounts: SlotCounts; slotSides: SlotSides; activeSlot: number; mode: DisplayMode; translucent: boolean; sourceOpacity: number; guideOpacity: number; wireframe: boolean; settings: Settings; guide: number; layers: LayerVisibility; layerOpacities: LayerValues; layerLocks: LayerLocks; tool: CadTool; cameraAction: CameraAction; sectionEnabled: boolean; sectionOffset: number; heatmap: boolean; heatmapGeometry: THREE.BufferGeometry | null; collision: boolean; playing: boolean; progress: number; view: string; onViewChange: (view: string) => void; guideRef: React.RefObject<THREE.Group | null>; imported: THREE.BufferGeometry | null; originalTransform: THREE.Matrix4 | null; targetImported: THREE.BufferGeometry | null; targetTransform: THREE.Matrix4 | null; opacity: number; originalColor: string; targetColor: string; guidePose?: GuidePose; gumPoints: Array<[number, number, number]>; pickingGum: boolean; onPickGum: (point: [number, number, number]) => void; template: GuideTemplate | 'both'; optimalAxis: boolean; onInsertionAxis: (axis: InsertionAxis | null) => void };
+type Props = { selected: number[]; onSelect: (id: number) => void; burTooth: number | null; slotCounts: SlotCounts; slotSides: SlotSides; activeSlot: number; mode: DisplayMode; translucent: boolean; sourceOpacity: number; guideOpacity: number; wireframe: boolean; settings: Settings; guide: number; layers: LayerVisibility; layerOpacities: LayerValues; layerLocks: LayerLocks; tool: CadTool; cameraAction: CameraAction; sectionEnabled: boolean; sectionOffset: number; heatmap: boolean; heatmapGeometry: THREE.BufferGeometry | null; collision: boolean; playing: boolean; progress: number; view: string; onViewChange: (view: string) => void; guideRef: React.RefObject<THREE.Group | null>; imported: THREE.BufferGeometry | null; originalTransform: THREE.Matrix4 | null; targetImported: THREE.BufferGeometry | null; targetTransform: THREE.Matrix4 | null; opacity: number; originalColor: string; targetColor: string; guidePose?: GuidePose; gumPoints: Array<[number, number, number]>; pickingGum: boolean; onPickGum: (point: [number, number, number]) => void; template: GuideTemplate | 'both'; optimalAxis: boolean; onInsertionAxis: (axis: InsertionAxis | null) => void; onCollisions: (collisions: BurCollisions | null) => void };
 export type DisplayMode = 'installed' | 'detached' | 'guide' | 'fragment' | 'teeth';
 export type GuidePose = { x: number; y: number; z: number; rx: number; ry: number; rz: number };
 export const identityGuidePose: GuidePose = { x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0 };
@@ -67,6 +68,21 @@ function Model(props: Props & { mode: DisplayMode; translucent: boolean }) {
   }, [insertionAxis, scanGuide]);
   // On a scan the bur runs along the stopper path next to the active contact found on the scan.
   const scanContact = scanGuide && !fragment ? scanGuide.contacts.find(contact => Math.abs(contact.coordinate - coordinate) < .01) ?? null : null;
+  // Collision control on a scan: the bur moved along every slot's stopper path against the neighbouring teeth and gum.
+  const collisions = useMemo(() => {
+    if (!props.collision || !props.imported || !scanGuide || fragment) return null;
+    const prepared = new Set(props.selected.map(id => toothIds.indexOf(id)));
+    const slots = contactLayout(props.settings, props.selected, props.slotSides).flatMap(slot => {
+      const contact = scanGuide.contacts.find(item => Math.abs(item.coordinate - slot.coordinate) < .01);
+      return contact ? [{ key: slot.key, label: slot.label, point: contact.point, tangent: contact.tangent, path: contact.path, lowerPrepared: prepared.has(Math.floor(slot.coordinate)), upperPrepared: prepared.has(Math.ceil(slot.coordinate)) }] : [];
+    });
+    return findBurCollisions(props.imported, props.originalTransform, slots, props.settings, gumLineNear(scanGuide.geometry, props.settings.gumOffset));
+  }, [props.collision, props.imported, props.originalTransform, scanGuide, fragment, props.selected, props.slotSides, props.settings.diameter, props.settings.length, props.settings.shaft, props.settings.totalLength, props.settings.profile, props.settings.stopperPosition, props.settings.angle, props.settings.clearance, props.settings.gumOffset]);
+  useEffect(() => { props.onCollisions(collisions); }, [collisions]);
+  const collisionGeometry = useMemo(() => collisions ? ([['neighbour', collisions.neighbourPoints, '#ff3b30'], ['gum', collisions.gumPoints, '#c040ff']] as const).filter(([, points]) => points.length).map(([key, points, color]) => ({ key, color, geometry: new THREE.BufferGeometry().setAttribute('position', new THREE.BufferAttribute(points, 3)) })) : [], [collisions]);
+  useEffect(() => () => collisionGeometry.forEach(item => item.geometry.dispose()), [collisionGeometry]);
+  const activeCollision = collisions?.slots.find(slot => slot.key === slots[props.activeSlot]?.key) ?? null;
+  const burHits = props.imported && !fragment ? Boolean(activeCollision && (activeCollision.neighbourPoints || activeCollision.gumPoints)) : props.collision && props.settings.angle > 15;
   useEffect(() => () => scanGuide?.geometry.dispose(), [scanGuide]);
   useEffect(() => () => scanGuideB?.geometry.dispose(), [scanGuideB]);
   const crowns = useMemo(() => toothIds.map((_, index) => crownGeometry(index)), []);
@@ -138,13 +154,14 @@ function Model(props: Props & { mode: DisplayMode; translucent: boolean }) {
     {showTeeth && !fragment && props.layers.target && props.targetImported && <mesh geometry={props.targetImported} matrixAutoUpdate={false} matrix={props.targetTransform ?? new THREE.Matrix4()}><meshStandardMaterial color={props.targetColor} transparent opacity={props.opacity / 100} side={THREE.DoubleSide} depthWrite={false} /></mesh>}
     {showTeeth && !props.imported && props.layers.supports && !fragment && layout.supports.map(index => <mesh key={`support-${index}`} geometry={crowns[index]} position={toothPosition(index)} rotation={[0, (index - 6.5) * .215, 0]} scale={1.013}><meshStandardMaterial color="#6e9cba" transparent opacity={props.layerOpacities.supports / 100} depthWrite={false} /></mesh>)}
     {props.imported && !fragment && props.gumPoints.map(([x, y, z], index) => <mesh key={`gum-${index}`} position={[x, y, z]} raycast={() => null}><sphereGeometry args={[.35, 16, 12]} /><meshBasicMaterial color="#e2557a" depthTest={false} /></mesh>)}
+    {props.mode !== 'detached' && collisionGeometry.map(item => <points key={item.key} name={`collision-${item.key}`} geometry={item.geometry} raycast={() => null} renderOrder={5}><pointsMaterial color={item.color} size={.45} sizeAttenuation depthTest={false} transparent /></points>)}
     {axisArrow && !fragment && <group name="insertion-axis"><Line points={[axisArrow.start, axisArrow.end]} color="#2a7fd4" lineWidth={3} /><mesh position={axisArrow.end} quaternion={axisArrow.quaternion} raycast={() => null}><coneGeometry args={[.7, 2, 20]} /><meshBasicMaterial color="#2a7fd4" /></mesh></group>}
     <group ref={props.guideRef} name="guide-frame" visible={showGuide} position={[pose.x + (insertionAxis?.direction.x ?? 0) * lifted, pose.y + (insertionAxis?.direction.y ?? 1) * lifted, pose.z + (insertionAxis?.direction.z ?? 0) * lifted]} rotation={[pose.rx, pose.ry, pose.rz]}>
       {scanGuide && !fragment ? <><mesh name={`template-${props.template === 'B' ? 'B' : 'A'}`} geometry={scanGuide.geometry} raycast={props.pickingGum ? () => null : THREE.Mesh.prototype.raycast}><meshPhysicalMaterial color={props.template === 'B' ? '#5aa9d6' : '#edc832'} roughness={.28} metalness={0} clearcoat={.3} transparent={props.guideOpacity < 100} opacity={props.guideOpacity / 100} side={THREE.DoubleSide} depthWrite={props.guideOpacity === 100} /></mesh>{scanGuideB && <mesh name="template-B" geometry={scanGuideB.geometry} position={[0, 14, 0]} raycast={() => null}><meshPhysicalMaterial color="#5aa9d6" roughness={.28} metalness={0} clearcoat={.3} transparent={props.guideOpacity < 100} opacity={props.guideOpacity / 100} side={THREE.DoubleSide} depthWrite={props.guideOpacity === 100} /></mesh>}</> : layout.working.length > 0 && <mesh geometry={guideGeometry}><meshPhysicalMaterial color="#edc832" roughness={.28} metalness={0} clearcoat={.3} transparent={props.guideOpacity < 100} opacity={props.guideOpacity / 100} side={THREE.DoubleSide} depthWrite={props.guideOpacity === 100} /></mesh>}
 
         {showBur && <group ref={bur}>
         {props.settings.totalLength > props.settings.length && <mesh position={[0, (props.settings.totalLength - props.settings.length) / 2, 0]}><cylinderGeometry args={[props.settings.shaft / 2, props.settings.shaft / 2, props.settings.totalLength - props.settings.length, 32]} /><meshStandardMaterial color="#b9c3ca" metalness={.85} roughness={.22} transparent={props.layerOpacities.bur < 100} opacity={props.layerOpacities.bur / 100} /></mesh>}
-        <mesh position={[0, -props.settings.length / 2, 0]}><cylinderGeometry args={[props.settings.diameter / 2, props.settings.diameter / 2 * (props.settings.profile === 1 ? 1 : .7), props.settings.length, 32]} /><meshStandardMaterial color={props.collision && props.settings.angle > 15 ? '#ef6b57' : '#87929a'} metalness={.8} roughness={.65} transparent={props.layerOpacities.bur < 100} opacity={props.layerOpacities.bur / 100} /></mesh>
+        <mesh position={[0, -props.settings.length / 2, 0]}><cylinderGeometry args={[props.settings.diameter / 2, props.settings.diameter / 2 * (props.settings.profile === 1 ? 1 : .7), props.settings.length, 32]} /><meshStandardMaterial color={burHits ? '#ef6b57' : '#87929a'} metalness={.8} roughness={.65} transparent={props.layerOpacities.bur < 100} opacity={props.layerOpacities.bur / 100} /></mesh>
         {props.settings.stopperEnabled === 1 && stopper && <mesh position={[0, -props.settings.stopperPosition, 0]} geometry={stopper}><meshStandardMaterial color="#aab5bf" metalness={.9} roughness={.25} side={THREE.DoubleSide} transparent={props.layerOpacities.bur < 100} opacity={props.layerOpacities.bur / 100} /></mesh>}
         </group>}
       {props.layers.channels && channels.map(channel => <Line key={channel.key} points={channel.points} color="#8fadb8" transparent opacity={props.layerOpacities.channels / 100} lineWidth={2} />)}
@@ -161,21 +178,6 @@ function Model(props: Props & { mode: DisplayMode; translucent: boolean }) {
 
 
   </group>;
-}
-/** Point on a scan stopper path; crossAngle −1.42…1.42 spans the path like the demo guide's cross angle. */
-function scanPathPoint(path: THREE.Vector3[], crossAngle: number) {
-  return pathCurve(path).getPointAt(THREE.MathUtils.clamp((crossAngle + 1.42) / 2.84, 0, 1));
-}
-/** Unit tangent of a scan stopper path at the same parameter as scanPathPoint. */
-function scanPathTangent(path: THREE.Vector3[], crossAngle: number) {
-  return pathCurve(path).getTangentAt(THREE.MathUtils.clamp((crossAngle + 1.42) / 2.84, 0, 1));
-}
-// Smooth curve through the path points (constant speed by arc length), so the bur does not snap at each point.
-const pathCurves = new WeakMap<THREE.Vector3[], THREE.CatmullRomCurve3>();
-function pathCurve(path: THREE.Vector3[]) {
-  let curve = pathCurves.get(path);
-  if (!curve) { curve = new THREE.CatmullRomCurve3(path, false, 'centripetal'); curve.arcLengthDivisions = 400; pathCurves.set(path, curve); }
-  return curve;
 }
 function CameraControl({ view, mode, tool, command }: { view: string; mode: DisplayMode; tool: CadTool; command: CameraAction }) {
   const controls = useRef<any>(null);
