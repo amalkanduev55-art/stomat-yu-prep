@@ -33,7 +33,8 @@ function Model(props: Props & { mode: DisplayMode; translucent: boolean }) {
   const coordinate = slots[props.activeSlot]?.coordinate ?? firstIndex;
   const guideGeometry = useMemo(() => unifiedGuideGeometry(props.settings, props.guide, props.selected, fragmentMode ? firstIndex : undefined, props.slotCounts, props.slotSides), [props.settings.shaft, props.settings.clearance, props.settings.wall, props.guide, props.selected, fragmentMode, firstIndex, props.slotCounts, props.slotSides]);
   useEffect(() => () => guideGeometry.dispose(), [guideGeometry]);
-  // With an imported scan the guide body is built on the scan itself (seat offset + undercut block-out).
+  // With an imported scan the guide body is built on the scan itself (seat offset + undercut block-out), as a shell of
+  // the same thickness as the demo guide.
   // Body over the prepared teeth plus one unprepared support tooth on each side; whole arch with nothing selected.
   const scanSpan = useMemo<[number, number] | undefined>(() => { const { covered } = guideLayout(props.selected); return covered.length ? [covered[0] - .5, covered[covered.length - 1] + .5] : undefined; }, [props.selected]);
   // Two-template method: contacts alternate between A and B (templateOfContact).
@@ -44,7 +45,7 @@ function Model(props: Props & { mode: DisplayMode; translucent: boolean }) {
   }, [props.settings.shaft, props.settings.clearance, props.selected, props.slotSides]);
   // Removal heatmap: the Original scan coloured by depth to Target, shown instead of the plain scan.
   const heat = props.heatmap && props.heatmapGeometry ? props.heatmapGeometry : null;
-  const buildOn = (slots: number[], transform: THREE.Matrix4 | null) => buildScanGuide(props.imported!, transform, { clearance: props.settings.seatOffset, wall: props.settings.wall, gumOffset: props.settings.gumOffset, gumPoints: props.gumPoints, span: scanSpan, slots, slotWidth: props.settings.shaft + props.settings.clearance * 2 });
+  const buildOn = (slots: number[], transform: THREE.Matrix4 | null) => buildScanGuide(props.imported!, transform, { clearance: props.settings.seatOffset, wall: thickness, gumOffset: props.settings.gumOffset, gumPoints: props.gumPoints, span: scanSpan, slots, slotWidth: props.settings.shaft + props.settings.clearance * 2 });
   // Optimal insertion axis: least undercut under the footprint of the vertical guide (without slots).
   const insertionAxis = useMemo(() => {
     if (!props.imported || !props.optimalAxis) return null;
