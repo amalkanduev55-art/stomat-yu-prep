@@ -74,6 +74,8 @@ export function buildScanGuide(source: THREE.BufferGeometry, transform: THREE.Ma
   const nz = Math.ceil((bounds.max.z + margin - z0) / cell) + 1;
   const at = (i: number, j: number) => j * nx + i;
   const height = new Float32Array(nx * nz).fill(-Infinity);
+  // Lowest scan surface over each node: where the scan ends (its open rim), the guide must end too.
+  const low = new Float32Array(nx * nz).fill(Infinity);
 
   // 1. Top envelope: rasterize every triangle in XZ and splat every vertex.
   const index = scan.index;
@@ -85,6 +87,7 @@ export function buildScanGuide(source: THREE.BufferGeometry, transform: THREE.Ma
     for (const p of [a, b, c]) {
       const i = Math.round((p.x - x0) / cell), j = Math.round((p.z - z0) / cell);
       if (p.y > height[at(i, j)]) height[at(i, j)] = p.y;
+      if (p.y < low[at(i, j)]) low[at(i, j)] = p.y;
     }
     const det = (b.z - c.z) * (a.x - c.x) + (c.x - b.x) * (a.z - c.z);
     if (Math.abs(det) < 1e-12) continue;
@@ -98,6 +101,7 @@ export function buildScanGuide(source: THREE.BufferGeometry, transform: THREE.Ma
       if (u < -1e-6 || v < -1e-6 || w < -1e-6) continue;
       const y = u * a.y + v * b.y + w * c.y;
       if (y > height[at(i, j)]) height[at(i, j)] = y;
+      if (y < low[at(i, j)]) low[at(i, j)] = y;
     }
   }
 
@@ -267,6 +271,24 @@ export function buildScanGuide(source: THREE.BufferGeometry, transform: THREE.Ma
   const median = (values: number[]) => [...values].sort((a, b) => a - b)[values.length >> 1];
   const window = Math.round(1.5 / .2);
   const gum = margins.map((_, k) => [0, 1].map(side => median(margins.slice(Math.max(0, k - window), k + window + 1).map(m => m[side]))));
+  // The edge never runs below the scan. Where the scan is cut off close under the crowns, the margin found (or the
+  // fallback) can lie below its open rim, and the body then hung past the rim in tabs. Per arch sample and side: the
+  // lowest scan point within ±0.5 mm of the cross-section, then the highest of those over ±1 mm of arch, so the edge
+  // stays on the scan along a jagged rim too.
+  const scanLow = arch.frames.map(({ point, tangent, normal }) => [-1, 1].map(side => {
+    let lowest = Infinity;
+    for (let s = 0; s <= 14; s += cell) for (const t of [-.5, 0, .5]) {
+      const x = point.x + normal.x * s * side + tangent.x * t, z = point.z + normal.z * s * side + tangent.z * t;
+      const i = Math.round((x - x0) / cell), j = Math.round((z - z0) / cell);
+      if (i >= 0 && j >= 0 && i < nx && j < nz && low[at(i, j)] < lowest) lowest = low[at(i, j)];
+    }
+    return lowest;
+  }));
+  const rimReach = Math.round(1 / .2);
+  gum.forEach((sides, k) => { for (const side of [0, 1]) {
+    const rimHeight = Math.max(...scanLow.slice(Math.max(0, k - rimReach), k + rimReach + 1).map(lows => lows[side]).filter(Number.isFinite));
+    if (rimHeight > sides[side]) sides[side] = rimHeight;
+  } });
   // Hand-marked margin points: each moves the detected margin on its side of the arch to its own height
   // within ±1.5 mm of arch, fading out by ±4 mm; overlapping points are blended by weight.
   const nearestFrame = (x: number, z: number) => {
