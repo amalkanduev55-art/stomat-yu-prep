@@ -271,6 +271,24 @@ export function buildScanGuide(source: THREE.BufferGeometry, transform: THREE.Ma
   const median = (values: number[]) => [...values].sort((a, b) => a - b)[values.length >> 1];
   const window = Math.round(1.5 / .2);
   const gum = margins.map((_, k) => [0, 1].map(side => median(margins.slice(Math.max(0, k - window), k + window + 1).map(m => m[side]))));
+  // The edge runs as one smooth line along the arch. Single samples where the margin was missed (no crease, fallback,
+  // a crease on the gum below) lie deeper than their neighbours and hung as tabs: take the upper quartile over ±3 mm of
+  // arch, then average over ±1.5 mm.
+  // A clinical crown is under 8.5 mm tall: a margin deeper than that below the highest crown point within ±3 mm is a fold
+  // of the mucosa, not the gum line, and is raised to that depth first.
+  const quartile = Math.round(3 / .2), soften = Math.round(1.5 / .2);
+  gum.forEach((sides, k) => {
+    const crownTop = Math.max(...crowns.slice(Math.max(0, k - quartile), k + quartile + 1));
+    if (Number.isFinite(crownTop)) for (const side of [0, 1]) sides[side] = Math.max(sides[side], crownTop - 8.5);
+  });
+  const upper = gum.map((_, k) => [0, 1].map(side => {
+    const near = gum.slice(Math.max(0, k - quartile), k + quartile + 1).map(m => m[side]).sort((a, b) => a - b);
+    return near[Math.floor(near.length * .75)];
+  }));
+  upper.forEach((_, k) => { for (const side of [0, 1]) {
+    const near = upper.slice(Math.max(0, k - soften), k + soften + 1).map(m => m[side]);
+    gum[k][side] = near.reduce((sum, v) => sum + v, 0) / near.length;
+  } });
   // The edge never runs below the scan. Where the scan is cut off close under the crowns, the margin found (or the
   // fallback) can lie below its open rim, and the body then hung past the rim in tabs. Per arch sample and side: the
   // lowest scan point within ±0.5 mm of the cross-section, then the highest of those over ±1 mm of arch, so the edge
