@@ -20,6 +20,19 @@ export type ScanGuideOptions = {
   gumPoints?: Array<[number, number, number]>;
   /** Height of the continuous lower rim left under each slot, mm. */
   rim?: number;
+  /**
+   * Separate caps instead of one body: a short piece over the two teeth next to each slot, ending `capGap` / 2 short of
+   * the neighbouring contacts. Without slots the body is built whole as before.
+   */
+  caps?: boolean;
+  /** Gap between neighbouring caps along the arch, mm. */
+  capGap?: number;
+  /** Lowest the cap edge comes to the gingival margin, mm (the crown only, the gum stays free). */
+  capEdge?: number;
+  /** Radius of the ball the cap top is rounded with: grooves and embrasures narrower than it are filled, mm. */
+  round?: number;
+  /** Half-width along the arch around each slot where the cap top stays the plain outer surface (stopper radius), mm. */
+  seat?: number;
 };
 
 export type ScanGuideResult = {
@@ -202,6 +215,32 @@ export function buildScanGuide(source: THREE.BufferGeometry, transform: THREE.Ma
   // Outer surface = the fitted inner surface offset by the wall, so wherever the fit lifted the inner surface (narrow
   // grooves, steep walls) the wall keeps its full thickness instead of thinning out into holes.
   const outer = offset(wall, cell * Math.SQRT2, inner);
+  // Caps get a smooth, closed top: morphological closing of the outer surface by a ball (dilate, then erode), which fills
+  // fissures and embrasures and never lowers the surface, so the wall only gets thicker. Where the stopper rests next to
+  // a slot the plain outer surface is kept (see `seated` below), so the stopper paths and the bur depth do not change.
+  const round = options.caps && options.slots?.length ? Math.max(0, options.round ?? 2.5) : 0;
+  let shellTop = outer;
+  if (round > 0) {
+    const reach = Math.ceil(round / cell);
+    const kernel: Array<[number, number, number]> = [];
+    for (let dj = -reach; dj <= reach; dj++) for (let di = -reach; di <= reach; di++) {
+      const d = Math.hypot(di, dj) * cell;
+      if (d <= round) kernel.push([di, dj, Math.sqrt(round * round - d * d)]);
+    }
+    const dilated = offset(round, 0, outer);
+    shellTop = new Float32Array(nx * nz).fill(-Infinity);
+    for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+      const k = at(i, j);
+      if (outer[k] === -Infinity) continue;
+      let lowest = Infinity;
+      for (const [di, dj, lift] of kernel) {
+        const ii = i + di, jj = j + dj;
+        const h = ii < 0 || jj < 0 || ii >= nx || jj >= nz ? -Infinity : dilated[at(ii, jj)];
+        if (h - lift < lowest) lowest = h - lift;
+      }
+      shellTop[k] = Math.max(outer[k], lowest);
+    }
+  }
 
   // 3. Occlusal plane y = p0 + p1·x + p2·z from local maxima (cusp tips), refit without low outliers.
   const peakReach = Math.round(2.5 / cell);
@@ -340,6 +379,13 @@ export function buildScanGuide(source: THREE.BufferGeometry, transform: THREE.Ma
   const spanFrom = options.span ? arcOf(options.span[0], -Infinity) : -Infinity;
   const spanTo = options.span ? arcOf(options.span[1], Infinity) : Infinity;
   // Nearest arch sample for a point: its gingival floor on that side, or −∞ outside the covered span.
+  // Caps: the arch ranges each cap covers, from halfway past the neighbouring contacts' gap to the next one.
+  const capGap = Math.max(0, options.capGap ?? .6);
+  const capRanges = round > 0 ? contacts.filter(contact => options.slots!.some(coordinate => Math.abs(coordinate - contact.coordinate) < .01)).map(contact => {
+    const before = contacts.filter(other => other.arc < contact.arc).at(-1), after = contacts.find(other => other.arc > contact.arc);
+    return [before ? before.arc + capGap / 2 : contact.arc - 7, after ? after.arc - capGap / 2 : contact.arc + 7];
+  }) : null;
+  const edgeLift = round > 0 ? Math.max(gumOffset, options.capEdge ?? 1.5) : gumOffset;
   const floorAt = (x: number, z: number) => {
     let best = 0, distance = Infinity;
     for (let k = 0; k < arch.frames.length; k += 2) {
@@ -352,8 +398,9 @@ export function buildScanGuide(source: THREE.BufferGeometry, transform: THREE.Ma
     }
     const frame = arch.frames[best];
     if (frame.arc < spanFrom || frame.arc > spanTo || (frame.arc === lastArc && spanTo < Infinity) || (best === 0 && spanFrom > -Infinity)) return Infinity;
+    if (capRanges && !capRanges.some(([from, to]) => frame.arc >= from && frame.arc <= to)) return Infinity;
     const side = (x - frame.point.x) * frame.normal.x + (z - frame.point.z) * frame.normal.z < 0 ? 0 : 1;
-    return gum[best][side] + gumOffset;
+    return gum[best][side] + edgeLift;
   };
 
   // Bur slots: a band across the arch at each requested contact, cut down to a continuous lower rim.
@@ -364,6 +411,13 @@ export function buildScanGuide(source: THREE.BufferGeometry, transform: THREE.Ma
     const dx = x - point.x, dz = z - point.z;
     return Math.abs(dx * tangent.x + dz * tangent.z) <= slotHalf && Math.abs(dx * normal.x + dz * normal.z) <= 12;
   });
+  // Share of the rounded cap top used at a point: 0 under the stopper next to a slot, rising to 1 over the next 1.5 mm.
+  const seat = Math.max(0, options.seat ?? 2.25) + cell;
+  const rounded = (x: number, z: number) => Math.min(1, ...slotContacts.map(({ point, tangent, normal }) => {
+    const dx = x - point.x, dz = z - point.z;
+    if (Math.abs(dx * normal.x + dz * normal.z) > 12) return 1;
+    return THREE.MathUtils.smoothstep(Math.abs(dx * tangent.x + dz * tangent.z), seat, seat + 1.5);
+  }));
   const outerAt = (x: number, z: number) => {
     const i = Math.round((x - x0) / cell), j = Math.round((z - z0) / cell);
     return i < 0 || j < 0 || i >= nx || j >= nz ? -Infinity : outer[at(i, j)];
@@ -412,7 +466,8 @@ export function buildScanGuide(source: THREE.BufferGeometry, transform: THREE.Ma
     const x = x0 + i * cell, z = z0 + j * cell;
     if (outer[k] === -Infinity) { valid[k] = 0; continue; }
     const floor = floorAt(x, z);
-    top[k] = slotContacts.length && inSlot(x, z) ? Math.min(outer[k], floor + rim) : outer[k];
+    const surface = shellTop === outer ? outer[k] : outer[k] + (shellTop[k] - outer[k]) * rounded(x, z);
+    top[k] = slotContacts.length && inSlot(x, z) ? Math.min(surface, floor + rim) : surface;
     bottom[k] = Math.max(inner[k], floor);
     valid[k] = floor < Infinity && top[k] - bottom[k] >= 0.2 ? 1 : 0;
   }
@@ -421,7 +476,7 @@ export function buildScanGuide(source: THREE.BufferGeometry, transform: THREE.Ma
   for (let j = 0; j < nz - 1; j++) for (let i = 0; i < nx - 1; i++) {
     cells[cellAt(i, j)] = valid[at(i, j)] & valid[at(i + 1, j)] & valid[at(i, j + 1)] & valid[at(i + 1, j + 1)];
   }
-  keepLargestComponent(cells, nx - 1, nz - 1);
+  keepLargestComponent(cells, nx - 1, nz - 1, capRanges ? .2 : 1);
 
   // Closed mesh: top quads (+Y), bottom quads (−Y), side walls on every boundary edge of the cell mask.
   const out: number[] = [];
@@ -643,8 +698,10 @@ function fitPlane(points: THREE.Vector3[]) {
   return (x: number, z: number) => p.x + p.y * x + p.z * z;
 }
 
-function keepLargestComponent(cells: Uint8Array, width: number, depth: number) {
+/** Keeps the largest connected piece of the cell mask and every other piece at least `share` of its size (caps). */
+function keepLargestComponent(cells: Uint8Array, width: number, depth: number, share = 1) {
   const label = new Int32Array(cells.length).fill(-1);
+  const sizes: number[] = [];
   let best = -1, bestSize = 0, next = 0;
   const stack: number[] = [];
   for (let start = 0; start < cells.length; start++) {
@@ -660,10 +717,11 @@ function keepLargestComponent(cells: Uint8Array, width: number, depth: number) {
         if (cells[neighbour] && label[neighbour] < 0) { label[neighbour] = next; stack.push(neighbour); }
       }
     }
+    sizes.push(size);
     if (size > bestSize) { bestSize = size; best = next; }
     next++;
   }
-  for (let k = 0; k < cells.length; k++) if (label[k] !== best) cells[k] = 0;
+  for (let k = 0; k < cells.length; k++) if (label[k] !== best && (label[k] < 0 || sizes[label[k]] < share * bestSize)) cells[k] = 0;
 }
 
 export type ScanContact = {

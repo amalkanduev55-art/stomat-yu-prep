@@ -33,7 +33,7 @@ function Model(props: Props & { mode: DisplayMode; translucent: boolean }) {
   const coordinate = slots[props.activeSlot]?.coordinate ?? firstIndex;
   const guideGeometry = useMemo(() => unifiedGuideGeometry(props.settings, props.guide, props.selected, fragmentMode ? firstIndex : undefined, props.slotCounts, props.slotSides), [props.settings.shaft, props.settings.clearance, props.settings.wall, props.guide, props.selected, fragmentMode, firstIndex, props.slotCounts, props.slotSides]);
   useEffect(() => () => guideGeometry.dispose(), [guideGeometry]);
-  // With an imported scan the guide body is built on the scan itself (seat offset + undercut block-out).
+  // With an imported scan the guide is built on the scan itself (seat offset + undercut block-out): one cap per slot.
   // Body over the prepared teeth plus one unprepared support tooth on each side; whole arch with nothing selected.
   const scanSpan = useMemo<[number, number] | undefined>(() => { const { covered } = guideLayout(props.selected); return covered.length ? [covered[0] - .5, covered[covered.length - 1] + .5] : undefined; }, [props.selected]);
   // Two-template method: contacts alternate between A and B (templateOfContact).
@@ -44,7 +44,7 @@ function Model(props: Props & { mode: DisplayMode; translucent: boolean }) {
   }, [props.settings.shaft, props.settings.clearance, props.selected, props.slotSides]);
   // Removal heatmap: the Original scan coloured by depth to Target, shown instead of the plain scan.
   const heat = props.heatmap && props.heatmapGeometry ? props.heatmapGeometry : null;
-  const buildOn = (slots: number[], transform: THREE.Matrix4 | null) => buildScanGuide(props.imported!, transform, { clearance: props.settings.seatOffset, wall: props.settings.wall, gumOffset: props.settings.gumOffset, gumPoints: props.gumPoints, span: scanSpan, slots, slotWidth: props.settings.shaft + props.settings.clearance * 2 });
+  const buildOn = (slots: number[], transform: THREE.Matrix4 | null) => buildScanGuide(props.imported!, transform, { clearance: props.settings.seatOffset, wall: props.settings.wall, gumOffset: props.settings.gumOffset, gumPoints: props.gumPoints, span: scanSpan, slots, slotWidth: props.settings.shaft + props.settings.clearance * 2, caps: true, seat: props.settings.stopper / 2 });
   // Optimal insertion axis: least undercut under the footprint of the vertical guide (without slots).
   const insertionAxis = useMemo(() => {
     if (!props.imported || !props.optimalAxis) return null;
@@ -56,8 +56,8 @@ function Model(props: Props & { mode: DisplayMode; translucent: boolean }) {
   }, [props.imported, props.originalTransform, props.settings.seatOffset, props.settings.wall, props.settings.gumOffset, props.gumPoints, scanSpan, props.optimalAxis]);
   useEffect(() => { props.onInsertionAxis(insertionAxis); }, [insertionAxis]);
   const buildTemplate = (slots: number[]) => insertionAxis && insertionAxis.tilt > 0 ? buildAlongAxis(insertionAxis.direction, props.originalTransform, transform => buildOn(slots, transform)) : buildOn(slots, props.originalTransform);
-  const scanGuide = useMemo(() => props.imported ? buildTemplate(scanSlots[props.template === 'B' ? 'B' : 'A']) : null, [props.imported, props.originalTransform, props.settings.seatOffset, props.settings.wall, props.settings.gumOffset, props.gumPoints, props.settings.shaft, props.settings.clearance, scanSlots, scanSpan, props.template === 'B', insertionAxis]);
-  const scanGuideB = useMemo(() => props.imported && props.template === 'both' ? buildTemplate(scanSlots.B) : null, [props.imported, props.originalTransform, props.settings.seatOffset, props.settings.wall, props.settings.gumOffset, props.gumPoints, props.settings.shaft, props.settings.clearance, scanSlots, scanSpan, props.template === 'both', insertionAxis]);
+  const scanGuide = useMemo(() => props.imported ? buildTemplate(scanSlots[props.template === 'B' ? 'B' : 'A']) : null, [props.imported, props.originalTransform, props.settings.seatOffset, props.settings.wall, props.settings.gumOffset, props.gumPoints, props.settings.shaft, props.settings.clearance, props.settings.stopper, scanSlots, scanSpan, props.template === 'B', insertionAxis]);
+  const scanGuideB = useMemo(() => props.imported && props.template === 'both' ? buildTemplate(scanSlots.B) : null, [props.imported, props.originalTransform, props.settings.seatOffset, props.settings.wall, props.settings.gumOffset, props.gumPoints, props.settings.shaft, props.settings.clearance, props.settings.stopper, scanSlots, scanSpan, props.template === 'both', insertionAxis]);
   // Arrow of the insertion axis over the middle of the guide.
   const axisArrow = useMemo(() => {
     if (!insertionAxis || !scanGuide) return null;
