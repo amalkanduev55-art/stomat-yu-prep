@@ -20,6 +20,10 @@ export type ScanGuideOptions = {
   gumPoints?: Array<[number, number, number]>;
   /** Height of the continuous lower rim left under each slot, mm. */
   rim?: number;
+  /** Body thickness away from the slots, mm (default: `wall`). Within `seat` of each slot, where the stopper rests, the
+   * body keeps the full `wall`, so the stopper height and the bur depth do not depend on it. */
+  shell?: number;
+  seat?: number;
 };
 
 export type ScanGuideResult = {
@@ -202,6 +206,8 @@ export function buildScanGuide(source: THREE.BufferGeometry, transform: THREE.Ma
   // Outer surface = the fitted inner surface offset by the wall, so wherever the fit lifted the inner surface (narrow
   // grooves, steep walls) the wall keeps its full thickness instead of thinning out into holes.
   const outer = offset(wall, cell * Math.SQRT2, inner);
+  const shell = Math.min(wall, Math.max(.2, options.shell ?? wall));
+  const thin = shell < wall ? offset(shell, cell * Math.SQRT2, inner) : outer;
 
   // 3. Occlusal plane y = p0 + p1·x + p2·z from local maxima (cusp tips), refit without low outliers.
   const peakReach = Math.round(2.5 / cell);
@@ -364,6 +370,8 @@ export function buildScanGuide(source: THREE.BufferGeometry, transform: THREE.Ma
     const dx = x - point.x, dz = z - point.z;
     return Math.abs(dx * tangent.x + dz * tangent.z) <= slotHalf && Math.abs(dx * normal.x + dz * normal.z) <= 12;
   });
+  const seatHalf = slotHalf + (options.seat ?? 3);
+  const nearSlot = (x: number, z: number) => slotContacts.some(({ point, tangent }) => Math.abs((x - point.x) * tangent.x + (z - point.z) * tangent.z) <= seatHalf);
   const outerAt = (x: number, z: number) => {
     const i = Math.round((x - x0) / cell), j = Math.round((z - z0) / cell);
     return i < 0 || j < 0 || i >= nx || j >= nz ? -Infinity : outer[at(i, j)];
@@ -404,15 +412,17 @@ export function buildScanGuide(source: THREE.BufferGeometry, transform: THREE.Ma
     return raw.map((point, n) => point.clone().setY(smoothed[n] + lift[n] + deficit));
   });
 
-  // Node heights of the body: top = outer offset, bottom = inner offset clipped by the gingival floor.
+  // Node heights of the body: top = outer offset (full wall around the slots, `shell` elsewhere), bottom = inner offset
+  // clipped by the gingival floor.
   const top = new Float32Array(nx * nz), bottom = new Float32Array(nx * nz);
   const valid = new Uint8Array(nx * nz);
   for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
     const k = at(i, j);
     const x = x0 + i * cell, z = z0 + j * cell;
-    if (outer[k] === -Infinity) { valid[k] = 0; continue; }
+    const surface = nearSlot(x, z) ? outer[k] : thin[k];
+    if (surface === -Infinity) { valid[k] = 0; continue; }
     const floor = floorAt(x, z);
-    top[k] = slotContacts.length && inSlot(x, z) ? Math.min(outer[k], floor + rim) : outer[k];
+    top[k] = slotContacts.length && inSlot(x, z) ? Math.min(surface, floor + rim) : surface;
     bottom[k] = Math.max(inner[k], floor);
     valid[k] = floor < Infinity && top[k] - bottom[k] >= 0.2 ? 1 : 0;
   }
