@@ -4,13 +4,16 @@ import { gingivalSurfaceHeight } from './gingivaGeometry';
 
 type GuideSettings = { shaft: number; clearance: number; wall: number };
 export type SlotCounts = Record<number, number>;
+/** Which contacts of a tooth get a bur slot: both (default), only mesial or only distal. */
+export type SlotSides = Record<number, 'both' | 'mesial' | 'distal'>;
 
-export function contactSlots(settings: GuideSettings, id: number) {
+export function contactSlots(settings: GuideSettings, id: number, sides: SlotSides = {}) {
   const index = toothIds.indexOf(id);
   const width = settings.shaft + settings.clearance * 2;
   if (index < 0 || width > 4.05) return [];
   const mesial = index < 7 ? .5 : -.5;
-  return [{ side: 'Мезиальный', delta: mesial }, { side: 'Дистальный', delta: -mesial }].flatMap(({ side, delta }) => {
+  const chosen = sides[id] ?? 'both';
+  return [{ side: 'Мезиальный', delta: mesial }, { side: 'Дистальный', delta: -mesial }].filter((_, n) => chosen === 'both' || (chosen === 'mesial') === (n === 0)).flatMap(({ side, delta }) => {
     const coordinate = index + delta;
     if (coordinate < .5 || coordinate > toothIds.length - 1.5) return [];
     const first = toothIds[Math.floor(coordinate)];
@@ -19,8 +22,18 @@ export function contactSlots(settings: GuideSettings, id: number) {
   });
 }
 
-export function contactLayout(settings: GuideSettings, selected: number[]) {
-  return [...new Map(selected.flatMap(id => contactSlots(settings, id)).map(slot => [slot.key, slot])).values()].sort((first, second) => first.coordinate - second.coordinate);
+export function contactLayout(settings: GuideSettings, selected: number[], sides: SlotSides = {}) {
+  return [...new Map(selected.flatMap(id => contactSlots(settings, id, sides)).map(slot => [slot.key, slot])).values()].sort((first, second) => first.coordinate - second.coordinate);
+}
+
+export type GuideTemplate = 'A' | 'B';
+
+/**
+ * Two-template method: the contacts of the selected teeth alternate along the arch between template A and template B,
+ * so every slot of one template is solid wall in the other and the two together reach every contact.
+ */
+export function templateOfContact(index: number): GuideTemplate {
+  return index % 2 === 0 ? 'A' : 'B';
 }
 
 export function maximumSlotCount(settings: GuideSettings) {
@@ -66,14 +79,14 @@ export function guideSurfacePoint(coordinate: number, crossAngle: number, offset
   return new THREE.Vector3(Math.sin(angle) * (20 + crossDepth), THREE.MathUtils.lerp(margin, 5.55 + offset, rise), Math.cos(angle) * (21 + crossDepth) - 8);
 }
 
-export function unifiedGuideGeometry(settings: GuideSettings, guide: number, selected: number[], fragmentIndex?: number, slotCounts: SlotCounts = {}) {
+export function unifiedGuideGeometry(settings: GuideSettings, guide: number, selected: number[], fragmentIndex?: number, slotCounts: SlotCounts = {}, sides: SlotSides = {}) {
   const layout = guideLayout(selected);
   if (!layout.working.length) return new THREE.BufferGeometry();
   const fragmentExtent = .6 + (settings.shaft + settings.clearance * 2) / 8.6;
   const start = fragmentIndex === undefined ? layout.covered[0] - .52 : fragmentIndex - fragmentExtent;
   const end = fragmentIndex === undefined ? layout.covered[layout.covered.length - 1] + .52 : fragmentIndex + fragmentExtent;
   const thickness = Math.min(1.2, Math.max(.25, settings.wall * .4));
-  const slots = contactLayout(settings, fragmentIndex === undefined ? selected : [toothIds[fragmentIndex]]).map(slot => [slot.left, slot.right]);
+  const slots = contactLayout(settings, fragmentIndex === undefined ? selected : [toothIds[fragmentIndex]], sides).map(slot => [slot.left, slot.right]);
   const boundaries = new Set([start, end, ...slots.flat()]);
   const segments = Math.ceil((end - start) * 18);
   for (let step = 0; step <= segments; step++) boundaries.add(start + (end - start) * step / segments);

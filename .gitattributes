@@ -1,6 +1,5 @@
 # Git LFS Tracking Rules
 # Generated for binary, large, and non-diffable file types
-
 # ---------------------------------------------------------------------------
 # Images & Graphics
 # ---------------------------------------------------------------------------
@@ -16,7 +15,6 @@
 *.psd                filter=lfs diff=lfs merge=lfs -text
 *.ai                 filter=lfs diff=lfs merge=lfs -text
 *.sketch             filter=lfs diff=lfs merge=lfs -text
-
 # ---------------------------------------------------------------------------
 # Video
 # ---------------------------------------------------------------------------
@@ -30,7 +28,6 @@
 *.m4v                filter=lfs diff=lfs merge=lfs -text
 *.mpg                filter=lfs diff=lfs merge=lfs -text
 *.mpeg               filter=lfs diff=lfs merge=lfs -text
-
 # ---------------------------------------------------------------------------
 # Audio
 # ---------------------------------------------------------------------------
@@ -42,7 +39,6 @@
 *.m4a                filter=lfs diff=lfs merge=lfs -text
 *.wma                filter=lfs diff=lfs merge=lfs -text
 *.aiff               filter=lfs diff=lfs merge=lfs -text
-
 # ---------------------------------------------------------------------------
 # 3D & Game Assets
 # ---------------------------------------------------------------------------
@@ -56,7 +52,6 @@
 *.unitypackage       filter=lfs diff=lfs merge=lfs -text
 *.uasset             filter=lfs diff=lfs merge=lfs -text
 *.umap               filter=lfs diff=lfs merge=lfs -text
-
 # ---------------------------------------------------------------------------
 # Archives & Compressed Files
 # ---------------------------------------------------------------------------
@@ -67,7 +62,6 @@
 *.7z                 filter=lfs diff=lfs merge=lfs -text
 *.rar                filter=lfs diff=lfs merge=lfs -text
 *.tgz                filter=lfs diff=lfs merge=lfs -text
-
 # ---------------------------------------------------------------------------
 # Documents & Fonts
 # ---------------------------------------------------------------------------
@@ -80,7 +74,6 @@
 *.woff               filter=lfs diff=lfs merge=lfs -text
 *.woff2              filter=lfs diff=lfs merge=lfs -text
 *.eot                filter=lfs diff=lfs merge=lfs -text
-
 # ---------------------------------------------------------------------------
 # Data & Machine Learning
 # ---------------------------------------------------------------------------
@@ -98,7 +91,6 @@
 *.pb                 filter=lfs diff=lfs merge=lfs -text
 *.safetensors        filter=lfs diff=lfs merge=lfs -text
 *.gguf               filter=lfs diff=lfs merge=lfs -text
-
 # ---------------------------------------------------------------------------
 # Databases
 # ---------------------------------------------------------------------------
@@ -107,7 +99,6 @@
 *.sqlite3            filter=lfs diff=lfs merge=lfs -text
 *.mdb                filter=lfs diff=lfs merge=lfs -text
 *.accdb              filter=lfs diff=lfs merge=lfs -text
-
 # ---------------------------------------------------------------------------
 # Executables & Libraries
 # ---------------------------------------------------------------------------
@@ -118,7 +109,6 @@
 *.a                  filter=lfs diff=lfs merge=lfs -text
 *.lib                filter=lfs diff=lfs merge=lfs -text
 *.wasm               filter=lfs diff=lfs merge=lfs -text
-
 # ---------------------------------------------------------------------------
 # Build Artifacts & Packages
 # ---------------------------------------------------------------------------
@@ -132,7 +122,6 @@
 *.dmg                filter=lfs diff=lfs merge=lfs -text
 *.iso                filter=lfs diff=lfs merge=lfs -text
 *.img                filter=lfs diff=lfs merge=lfs -text
-
 # ---------------------------------------------------------------------------
 # CAD & Scientific
 # ---------------------------------------------------------------------------
@@ -144,3 +133,4 @@
 *.stl                filter=lfs diff=lfs merge=lfs -text
 *.nc                 filter=lfs diff=lfs merge=lfs -text
 *.mat                filter=lfs diff=lfs merge=lfs -text
+test-data/*.stl filter=lfs diff=lfs merge=lfs -text

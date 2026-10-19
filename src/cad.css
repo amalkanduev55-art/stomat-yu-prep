@@ -38,8 +38,9 @@
 .cad-theme .step.done>span { background: #283c36; border-color: #3b574c; color: #98beb0; }
 .cad-theme .step-arrow { color: #586879; }
 .cad-theme .export-button { border-color: #4a5d67; background: #2e3d43; color: #d0e1e2; }
-.cad-theme .main-layout { grid-template-columns: 208px minmax(360px,1fr) 296px; }
+.cad-theme .main-layout { position: relative; grid-template-columns: 208px minmax(360px,1fr); }
 .cad-theme .main-layout.layers-collapsed { grid-template-columns: 208px minmax(360px,1fr); }
+.cad-theme .right-panel { position: absolute; z-index: 20; top: 0; right: 0; bottom: 0; width: min(320px, 42vw); box-shadow: -12px 0 30px #00000045; }
 .cad-theme .layers-collapsed>.right-panel { display: none; }
 .cad-theme .left-panel,.cad-theme .right-panel { background: #1b2129; border-color: var(--border); }
 .cad-theme .left-panel { overflow-y: auto; }
@@ -316,3 +317,78 @@
 .cad-theme .template-status>div span { color:#91a7b7; }
 .cad-theme .template-status>div b { color:#a9c8ba; font-weight:500; }
 .cad-theme .template-status small { display:block; margin-top:6px; color:#839aaa; font-size:7px; line-height:1.5; }
+
+.cad-theme .mesh-diagnostics-panel { display: grid; gap: 8px; margin: 12px 0; }
+.cad-theme .mesh-diagnostics { display: grid; gap: 7px; padding: 11px 12px; border: 1px solid #3a4652; background: #202730; border-radius: 4px; font-size: 10px; }
+.cad-theme .mesh-diagnostics > b { color: #d6e1e9; font-size: 11px; }
+.cad-theme .mesh-diagnostics > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 5px 12px; }
+.cad-theme .mesh-diagnostics span, .cad-theme .mesh-diagnostics-panel > p { color: #94a5b4; }
+.cad-theme .mesh-diagnostics strong { color: #c5d8d7; font: 10px 'JetBrains Mono', monospace; }
+.cad-theme .mesh-diagnostics-panel > p { margin: 0; font-size: 10px; line-height: 1.5; }
+
+.cad-theme .model-color-controls { display: grid; gap: 9px; margin: 12px 0; padding: 12px; border: 1px solid #3a4652; border-radius: 4px; background: #202730; }
+.cad-theme .model-color-controls > b { color: #d6e1e9; font-size: 11px; }
+.cad-theme .model-color-controls > label { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: #aab8c4; font-size: 10px; }
+.cad-theme .model-color-controls input[type="color"] { width: 42px; height: 28px; padding: 2px; border: 1px solid #465461; border-radius: 4px; background: #151b22; cursor: pointer; }
+.cad-theme .color-presets { display: flex; flex-wrap: wrap; gap: 5px; }
+.cad-theme .color-presets button { padding: 6px 8px; border: 1px solid #43515e; border-radius: 3px; color: #c3d0da; font-size: 9px; }
+.cad-theme .model-color-controls > small { color: #8fa0af; font-size: 9px; line-height: 1.5; }
+
+/* Right-side Layers / Parameters open as a compact overlay drawer. */
+.cad-theme .main-layout { position: relative; grid-template-columns: 208px minmax(360px,1fr); }
+.cad-theme .main-layout.layers-collapsed { grid-template-columns: 208px minmax(360px,1fr); }
+.cad-theme .right-panel { position: absolute; z-index: 20; top: 0; right: 0; bottom: 0; width: min(320px, 42vw); box-shadow: -12px 0 30px #00000045; }
+.cad-theme .layers-collapsed > .right-panel { display: none; }
+@media (min-width: 1550px) {
+  .cad-theme .main-layout, .cad-theme .main-layout.layers-collapsed { grid-template-columns: 225px minmax(420px,1fr); }
+}
+@media (max-width: 1100px) {
+  .cad-theme .main-layout, .cad-theme .main-layout.layers-collapsed { grid-template-columns: 185px minmax(300px,1fr); }
+}
+@media (max-width: 950px) {
+  .cad-theme .main-layout, .cad-theme .main-layout.layers-collapsed { grid-template-columns: minmax(350px,1fr); }
+}
+
+
+/* Preserve the original odontogram geometry; only separate the controls below it. */
+.cad-theme .left-panel { box-sizing: border-box; padding-bottom: 18px; }
+.cad-theme .selected-teeth { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; margin: 10px 13px 8px; min-height: 35px; line-height: 1.5; }
+.cad-theme .selected-teeth b { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.cad-theme .selection-hint { margin: 7px 13px 17px; line-height: 1.5; }
+.cad-theme .section-heading:not(.tooth-heading) { margin-top: 15px; margin-bottom: 9px; }
+.cad-theme .construction-options { display: grid; grid-template-columns: 1fr; gap: 6px; margin: 0 12px 16px; }
+.cad-theme .construction-options button { display: flex; align-items: center; min-height: 34px; gap: 9px; padding: 8px 10px; border: 1px solid #3b4957; border-radius: 4px; text-align: left; }
+.cad-theme .construction-options button.selected { border-color: #6b9288; }
+
+
+/* Landmark registration panel */
+.landmark-align-panel {
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255,255,255,.025);
+}
+.landmark-align-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.landmark-align-heading b { font-size:12px; }
+.landmark-align-heading span { color:var(--muted-foreground); font-size:10px; white-space:nowrap; }
+.landmark-align-panel > p { color:var(--muted-foreground); font-size:11px; line-height:1.45; margin:8px 0; }
+.landmark-align-table { display:grid; gap:5px; }
+.landmark-align-row { display:grid; grid-template-columns:22px minmax(0,1fr) minmax(0,1fr); align-items:center; gap:6px; }
+.landmark-align-row > b { color:var(--muted-foreground); font-size:11px; text-align:center; }
+.landmark-align-row > div { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:3px; }
+.landmark-align-row input { min-width:0; width:100%; box-sizing:border-box; padding:6px 2px; border:1px solid var(--border); border-radius:4px; color:var(--foreground); background:var(--card); font-size:10px; text-align:center; }
+.landmark-align-labels { color:var(--muted-foreground); font-size:9px; }
+.landmark-align-labels span:nth-child(n+2) { text-align:center; }
+.landmark-align-panel .wide-secondary { width:100%; margin-top:10px; }
+.landmark-align-error { color:#ef8a79 !important; }
+.landmark-align-result { display:grid; grid-template-columns:1fr 1fr; gap:5px 10px; margin-top:10px; font-size:11px; }
+.landmark-align-result b, .landmark-align-result small { grid-column:1 / -1; }
+.landmark-align-result small { color:var(--muted-foreground); line-height:1.4; }
+
+.orientation-preview-panel { margin: 12px 0; padding: 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); }
+.orientation-preview-panel > b { display:block; font-size:12px; }
+.orientation-preview-panel > p { margin:6px 0 9px; color:var(--muted-foreground); font-size:10px; line-height:1.45; }
+.orientation-preview-actions { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:5px; }
+.orientation-preview-actions .wide-secondary { min-width:0; padding:7px 3px; font-size:10px; }
+.orientation-preview-actions .wide-secondary.active { border-color: #e2557a; color: #ffd9e3; background: #4a2633; }
